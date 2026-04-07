@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Avaterra – Battle Royale Board Game</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- ── Root layout ──────────────────────────────────────── -->
+<div id="root">
+
+  <!-- Phaser canvas goes here -->
+  <div id="phaser-container"></div>
+
+  <!-- Right panel (in-game HUD) -->
+  <div id="hud" class="hidden" style="flex:1;display:flex;flex-direction:column;padding:8px;gap:6px;overflow:hidden;min-width:280px;max-width:380px;">
+
+    <!-- Top: round + current player -->
+    <div class="panel-box" id="top-bar">
+      <span id="round-indicator">Round 1</span>
+      <span id="current-player-banner">—</span>
+      <div id="removal-warning"></div>
+    </div>
+
+    <!-- Players status -->
+    <div class="panel-box">
+      <div id="player-list"></div>
+    </div>
+
+    <!-- Current player's combat hand -->
+    <div class="panel-box" id="hand-display"></div>
+
+    <!-- Current player's inventory -->
+    <div class="panel-box" id="inventory-display"></div>
+
+    <!-- Action buttons -->
+    <div class="panel-box">
+      <div id="action-bar"></div>
+    </div>
+
+    <!-- Game log -->
+    <div class="panel-box" style="flex:1;overflow:hidden;">
+      <div style="font-size:11px;color:var(--text-dim);margin-bottom:4px;">Game Log</div>
+      <div id="game-log"></div>
+    </div>
+
+  </div><!-- /#right-panel -->
+</div><!-- /#root -->
+
+<!-- ── Tile tooltip ──────────────────────────────────────── -->
+<div id="tile-tooltip" class="hidden"></div>
+
+<!-- ── Toast ─────────────────────────────────────────────── -->
+<div id="toast" class="toast"></div>
+
+<!-- ── Character select overlay ──────────────────────────── -->
+<div id="char-select" class="overlay">
+  <div id="char-select-content"></div>
+</div>
+
+<!-- ── Combat overlay ────────────────────────────────────── -->
+<div id="combat-overlay" class="hidden"></div>
+
+<!-- ── General modal overlay ─────────────────────────────── -->
+<div id="modal-overlay" class="hidden"></div>
+
+<!-- ── Game over overlay ─────────────────────────────────── -->
+<div id="gameover-overlay" class="hidden"></div>
+
+<!-- ── Scripts ───────────────────────────────────────────── -->
+<!-- Phaser 3 -->
+<script src="https://cdn.jsdelivr.net/npm/phaser@3.60.0/dist/phaser.min.js"></script>
+
+<!-- Game code (order matters: data → state → scene → ui → main) -->
+<script src="js/data.js"></script>
+<script src="js/GameState.js"></script>
+<script src="js/GameScene.js"></script>
+<script src="js/UIManager.js"></script>
+<script src="js/main.js"></script>
+
+</body>
+</html>
