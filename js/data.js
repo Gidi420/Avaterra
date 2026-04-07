@@ -97,14 +97,16 @@ const CHARACTERS = [
 ];
 
 // ── TILE TYPES ───────────────────────────────────────────────
-// Special tile counts: forest×9, tower×2, fortress×2, swamp×2, vault×2, lava×2, curse×2, plain×3 = 24
+// Tile counts: forest×3, desert×3, meadow×3, tower×2, fortress×2, swamp×2, vault×2, lava×2, curse×2, plain×3 = 24
 const TILE_TYPE_DATA = {
   forest:   { label: 'Forest',   color: 0x1a5c2a, textColor: '#7dff9b', icon: '🌲', hasMonsters: true,  desc: 'Spend 1 Action to Hunt a monster and earn an item.' },
+  desert:   { label: 'Desert',   color: 0x7a5a20, textColor: '#ffe599', icon: '🏜', hasMonsters: true,  desc: 'Spend 1 Action to Hunt a monster and earn an item. Moving in costs 1 extra Action.' },
+  meadow:   { label: 'Meadow',   color: 0x2a5c1a, textColor: '#ccff88', icon: '🌸', hasMonsters: true,  desc: 'Spend 1 Action to Hunt. Recover 1 HP at the start of your turn if standing here.' },
   tower:    { label: 'Tower',    color: 0x8b6914, textColor: '#ffe066', icon: '🏛',  hasMonsters: false, desc: 'Spend 1 Action: teleport to other Tower. Or spend 1 Action to heal 3 HP (once per game).' },
   fortress: { label: 'Fortress', color: 0x3a3a4a, textColor: '#aaaacc', icon: '🏰', hasMonsters: false, desc: 'Must be drawn from the bag TWICE before it can be removed.' },
   swamp:    { label: 'Swamp',    color: 0x1a3a30, textColor: '#66ffcc', icon: '🌿', hasMonsters: false, desc: 'Lose 1 Action immediately when you move onto or through this tile.' },
   vault:    { label: 'Vault',    color: 0x3a1a5c, textColor: '#cc88ff', icon: '💎', hasMonsters: false, desc: 'Pay 1 XP to enter. On rounds 7, 10, 13: entering grants a free item.' },
-  lava:     { label: 'Lava',     color: 0x5c1a1a, textColor: '#ff6666', icon: '🌋', hasMonsters: false, desc: 'Lose 3 HP immediately upon entering.' },
+  lava:     { label: 'Lava',     color: 0x5c1a1a, textColor: '#ff6666', icon: '🌋', hasMonsters: false, desc: 'Lose 1 HP immediately upon entering.' },
   curse:    { label: 'Cursed',   color: 0x4a1a4a, textColor: '#ff88ff', icon: '💀', hasMonsters: false, desc: 'Discard 2 Combat Cards of your choice upon entering.' },
   plain:    { label: 'Plain',    color: 0x2a2010, textColor: '#ddcc88', icon: '⬜', hasMonsters: false, desc: 'No special effect.' },
 };
@@ -132,7 +134,9 @@ const WALLED_TILE_IDS = [3, 8, 9, 14, 15, 20];
 
 // Tile type distribution (shuffled at game start)
 const TILE_TYPE_POOL = [
-  'forest','forest','forest','forest','forest','forest','forest','forest','forest',
+  'forest','forest','forest',
+  'desert','desert','desert',
+  'meadow','meadow','meadow',
   'tower','tower',
   'fortress','fortress',
   'swamp','swamp',
@@ -144,19 +148,17 @@ const TILE_TYPE_POOL = [
 
 // ── ITEMS ────────────────────────────────────────────────────
 const ITEMS = [
-  // ── BRONZE (12 types × 3 copies = 36) ──
-  { id: 'mind_drain',      tier: 'bronze', name: 'Mind Drain',      icon: '🧠', desc: 'Force an opponent to discard 1 Combat Card of your choice.',                       timing: 'own_turn',   effect: 'mind_drain' },
+  // ── BRONZE (10 types × 3 copies = 30, plus 2 extra copies of Healing Potion + Battle Surge = 36) ──
+  { id: 'disarm',          tier: 'bronze', name: 'Disarm',          icon: '🧠', desc: 'Force an opponent to discard 1 Combat Card of your choice.',                       timing: 'own_turn',   effect: 'mind_drain' },
   { id: 'healing_potion',  tier: 'bronze', name: 'Healing Potion',  icon: '🧪', desc: 'Restore 3 HP (Vesper: only 2 HP).',                                                 timing: 'own_turn',   effect: 'heal',       value: 3 },
   { id: 'shockwave',       tier: 'bronze', name: 'Shockwave',       icon: '💥', desc: 'Push a player on your tile to any adjacent tile (ignores walls).',                 timing: 'own_turn',   effect: 'push' },
-  { id: 'wind_step',       tier: 'bronze', name: 'Wind Step',       icon: '💨', desc: 'Move 1 space in any legal direction for free (no Action cost).',                   timing: 'own_turn',   effect: 'free_move' },
+  { id: 'swift_boots',     tier: 'bronze', name: 'Swift Boots',     icon: '👟', desc: 'Move 1 space in any legal direction for free (no Action cost).',                   timing: 'own_turn',   effect: 'free_move' },
   { id: 'shield',          tier: 'bronze', name: 'Shield',          icon: '🛡', desc: 'Defensive: play when attacked to block the hit. Combat ends immediately, no damage.', timing: 'reaction', effect: 'shield', defensive: true },
   { id: 'terrain_rotator', tier: 'bronze', name: 'Terrain Rotator', icon: '🔄', desc: 'Rotate a walled tile in any direction.',                                            timing: 'own_turn',   effect: 'rotate_tile' },
   { id: 'sabotage',        tier: 'bronze', name: 'Sabotage',        icon: '🔨', desc: "Destroy one of an opponent's items at random.",                                     timing: 'own_turn',   effect: 'destroy_item' },
   { id: 'crystal_eye',     tier: 'bronze', name: 'Crystal Eye',     icon: '👁',  desc: "Look at an opponent's Combat Card hand.",                                           timing: 'own_turn',   effect: 'peek_hand' },
   { id: 'battle_surge',    tier: 'bronze', name: 'Battle Surge',    icon: '⚔',  desc: 'Your next successful attack deals +2 extra damage.',                                timing: 'own_turn',   effect: 'battle_surge', value: 2 },
   { id: 'soul_gem',        tier: 'bronze', name: 'Soul Gem',        icon: '✨',  desc: 'Instantly gain 2 XP.',                                                              timing: 'own_turn',   effect: 'gain_xp',    value: 2 },
-  { id: 'smoke_bomb',      tier: 'bronze', name: 'Smoke Bomb',      icon: '💨', desc: 'Defensive: cancel any combat immediately — no damage, no winner.',                  timing: 'reaction',   effect: 'smoke_bomb', defensive: true },
-  { id: 'swift_boots',     tier: 'bronze', name: 'Swift Boots',     icon: '👟', desc: 'Gain 1 extra Action Point this turn.',                                              timing: 'own_turn',   effect: 'extra_action', value: 1 },
 
   // ── SILVER (12 types × 3 copies = 36) ──
   { id: 'warp_stone',      tier: 'silver', name: 'Warp Stone',      icon: '🌀', desc: 'Instantly teleport to any available tile on the board.',                           timing: 'own_turn',   effect: 'teleport' },
@@ -181,11 +183,15 @@ const ITEMS = [
   { id: 'blink_strike',    tier: 'gold', name: 'Blink Strike',    icon: '🗡',  desc: 'Attack any player on any tile on the board. They cannot counter — only block.', timing: 'own_turn',   effect: 'blink_strike' },
 ];
 
+// IDs that get extra copies so totals match rulebook (bronze=36, silver=36, gold=12)
+const ITEM_EXTRA_COPIES = { healing_potion: 2, battle_surge: 2, grand_elixir: 2, counter_stance: 2, godslayer: 2, phoenix_feather: 2 };
+
 function buildItemDeck() {
   const deck = [];
   let uid = 0;
   ITEMS.forEach(template => {
-    const copies = template.tier === 'bronze' ? 3 : template.tier === 'silver' ? 3 : 2;
+    const base = template.tier === 'bronze' ? 3 : template.tier === 'silver' ? 3 : 2;
+    const copies = base + (ITEM_EXTRA_COPIES[template.id] || 0);
     for (let i = 0; i < copies; i++) {
       deck.push({ ...template, uid: uid++ });
     }

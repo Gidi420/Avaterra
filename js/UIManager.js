@@ -39,6 +39,8 @@ const UI = (() => {
     GS.on('blink_strike_prompt',   _onBlinkStrike);
     GS.on('void_rift_prompt',      _onVoidRift);
     GS.on('player_eliminated',     _onPlayerEliminated);
+    GS.on('mind_drain_prompt',     _onMindDrainPrompt);
+    GS.on('rotate_prompt',         _onRotatePrompt);
   }
 
   // ══════════════════════════════════════════════════════════
@@ -76,6 +78,30 @@ const UI = (() => {
     const setupDiv = document.createElement('div');
     setupDiv.id = 'player-setup-area';
     container.appendChild(setupDiv);
+
+    const randomBtn = document.createElement('button');
+    randomBtn.className = 'btn btn-secondary';
+    randomBtn.textContent = '🔀 Randomize Player Order';
+    randomBtn.style.marginBottom = '8px';
+    randomBtn.onclick = () => {
+      const count = parseInt($('player-count').value);
+      const rows  = [...$('player-setup-area').querySelectorAll('.player-setup-row')];
+      const names = rows.map(r => r.querySelector('.player-name-input').value);
+      const chars = rows.map(r => r.querySelector('.char-select-dropdown').value);
+      // Fisher-Yates shuffle
+      for (let i = count - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [names[i], names[j]] = [names[j], names[i]];
+        [chars[i], chars[j]] = [chars[j], chars[i]];
+      }
+      rows.forEach((r, i) => {
+        r.querySelector('.player-name-input').value = names[i];
+        r.querySelector('.char-select-dropdown').value = chars[i];
+        const prev = r.querySelector('.char-preview');
+        if (prev) _updateCharPreview(i, chars[i], prev);
+      });
+    };
+    container.appendChild(randomBtn);
 
     const startBtn = document.createElement('button');
     startBtn.className = 'btn btn-primary big-btn';
@@ -194,6 +220,15 @@ const UI = (() => {
       cpb.innerHTML = `<span style="color:${char ? char.color : '#fff'}">${cp.name}</span>'s Turn — <span class="ap-display">${cp.actionsLeft} ⚡</span>`;
     }
 
+    // Item deck counters
+    const deckBar = $('deck-counters');
+    if (deckBar && s.decks) {
+      deckBar.innerHTML =
+        `<span class="deck-count tier-bronze">🟤 ${s.decks.bronze.length}</span>` +
+        `<span class="deck-count tier-silver">⚪ ${s.decks.silver.length}</span>` +
+        `<span class="deck-count tier-gold">🟡 ${s.decks.gold.length}</span>`;
+    }
+
     // Player info list
     _renderPlayerList();
     _renderCurrentHand();
@@ -213,6 +248,7 @@ const UI = (() => {
       div.style.borderColor = char ? char.color : '#555';
       div.innerHTML = `
         <div class="pi-name" style="color:${char ? char.color : '#fff'}">${isCur ? '▶ ' : ''}${p.name}${p.alive ? '' : ' ☠'}</div>
+        <div class="pi-char-name" style="font-size:0.7em;opacity:0.75">${char ? char.name : ''}</div>
         <div class="pi-stats">
           <span class="pi-hp">❤ ${p.hp}/${p.maxHp}</span>
           <span class="pi-xp">✨ ${p.xp} XP</span>
@@ -393,11 +429,8 @@ const UI = (() => {
     } else if (item.effect === 'rotate_tile') {
       const tile = GS.getTile(p.tileId);
       if (!tile || !tile.hasWalls) { _toast('No walled tile here.', 'info'); return; }
-      _showModal(`Rotate Tile ${tile.id}`, `<p>Rotate the walled tile:</p>`, [
-        { label: '↻ Clockwise',        cls: 'btn-primary', onclick: () => { GS.commitRotateTile(tile.id, 'cw');  _closeModal(); }},
-        { label: '↺ Counter-Clockwise',cls: 'btn-primary', onclick: () => { GS.commitRotateTile(tile.id, 'ccw'); _closeModal(); }},
-        { label: 'Cancel', cls: 'btn-cancel', onclick: _closeModal },
-      ]);
+      // Consume item first — GS will emit rotate_prompt, handler shows the direction modal
+      GS.useItem(p.id, item.uid, null);
     } else if (item.effect === 'world_shaper') {
       GS.useItem(p.id, item.uid, null);
     } else if (item.effect === 'salvage') {
@@ -605,10 +638,42 @@ const UI = (() => {
   function _showSeekingArrow(combat) {
     const atk = GS.getPlayer(combat.attackerId);
     const def = GS.getPlayer(combat.defenderId);
-    _buildPassDeviceScreen(def.name, `defend against Seeking Arrow (${combat.arrowDamage} dmg)`, () => {
-      _buildCardSelector(def,
-        `${atk.name} fires a Seeking Arrow for <b>${combat.arrowDamage} damage</b><br><small>Play any card to block. You cannot counter.</small>`,
-        uid => GS.selectCombatCard(def.id, uid));
+    // Attacker picks which of defender's cards to destroy (blocking the arrow)
+    const defHand = combat.defenderHand || def.combatCards;
+    _buildPassDeviceScreen(atk.name, `choose a card from ${def.name}'s hand to destroy`, () => {
+      const el = $('combat-overlay');
+      el.innerHTML = '';
+      el.classList.remove('hidden');
+      const box = document.createElement('div');
+      box.className = 'combat-box';
+      box.innerHTML = `<div class="combat-title">${atk.name}: Seeking Arrow (${combat.arrowDamage} dmg)<br>
+        <small>${def.name}'s hand — pick one card to destroy (blocks the arrow), or press Skip to deal full damage.</small></div>`;
+      const hand = document.createElement('div');
+      hand.className = 'combat-hand';
+      if (defHand.length === 0) {
+        hand.innerHTML = '<div class="no-cards">Defender has no cards — arrow strikes automatically!</div>';
+        box.appendChild(hand);
+        const btn = document.createElement('button');
+        btn.className = 'btn btn-primary big-btn';
+        btn.textContent = 'Resolve';
+        btn.onclick = () => GS.selectCombatCard(atk.id, null);
+        box.appendChild(btn);
+      } else {
+        defHand.forEach(card => {
+          const btn = document.createElement('button');
+          btn.className = `combat-card-big type-${card.type}`;
+          btn.innerHTML = `<span class="card-icon">${COMBAT_CARD_ICONS[card.type]}</span><span class="card-name">${card.type.toUpperCase()}</span>`;
+          btn.onclick = () => GS.selectCombatCard(atk.id, card.uid);
+          hand.appendChild(btn);
+        });
+        box.appendChild(hand);
+        const skip = document.createElement('button');
+        skip.className = 'btn btn-cancel';
+        skip.textContent = '💥 Skip — Deal Full Damage Instead';
+        skip.onclick = () => GS.selectCombatCard(atk.id, null);
+        box.appendChild(skip);
+      }
+      el.appendChild(box);
     });
   }
 
@@ -714,6 +779,33 @@ const UI = (() => {
       !towerUsed ? { label: '❤ Heal 3 HP (1 AP, once per game)', cls: 'btn-primary', onclick: () => { GS.commitTowerAction('heal'); _closeModal(); }} : null,
       { label: 'Cancel', cls: 'btn-cancel', onclick: _closeModal },
     ].filter(Boolean));
+  }
+
+  function _onMindDrainPrompt({ attackerId, defenderId }) {
+    const atk = GS.getPlayer(attackerId);
+    const def = GS.getPlayer(defenderId);
+    let html = `<p><b>${atk.name}</b> uses Disarm on <b>${def.name}</b>!</p>
+      <p>Choose one of ${def.name}'s combat cards to discard:</p><div class="hand-reveal">`;
+    def.combatCards.forEach(card => {
+      html += `<button class="combat-card-mini selectable" style="background:${COMBAT_CARD_COLORS[card.type]};cursor:pointer;padding:6px 10px;"
+        onclick="GS.resolveMindDrain(${attackerId}, '${card.uid}'); UI._closeModal();">
+        ${COMBAT_CARD_ICONS[card.type]} ${card.type}</button>`;
+    });
+    html += '</div>';
+    _showModal('Disarm', html, [
+      { label: 'Cancel', cls: 'btn-cancel', onclick: _closeModal },
+    ]);
+  }
+
+  function _onRotatePrompt({ playerId }) {
+    const p    = GS.getPlayer(playerId);
+    const tile = GS.getTile(p.tileId);
+    if (!tile || !tile.hasWalls) { _toast('No walled tile here to rotate.', 'error'); return; }
+    _showModal(`Rotate Tile ${tile.id}`, `<p>Use the Terrain Rotator to spin the walled tile:</p>`, [
+      { label: '↻ Clockwise',         cls: 'btn-primary', onclick: () => { GS.commitRotateTile(tile.id, 'cw');  _closeModal(); }},
+      { label: '↺ Counter-Clockwise', cls: 'btn-primary', onclick: () => { GS.commitRotateTile(tile.id, 'ccw'); _closeModal(); }},
+      { label: 'Cancel', cls: 'btn-cancel', onclick: _closeModal },
+    ]);
   }
 
   function _onPeekReveal({ viewerId, targetId, hand }) {
@@ -1006,33 +1098,33 @@ const UI = (() => {
             { label: 'Confirm', cls: 'btn-primary', onclick: () => {
               const sel = [...document.querySelectorAll('.toggle-btn.selected')].map(b => parseInt(b.dataset.id));
               if (sel.length === 0) { _toast('Select at least 1 target.', 'error'); return; }
-              GS.commitMindLink(sel);
               _closeModal();
+              GS.commitMindLink(sel);
             }},
             { label: 'Cancel', cls: 'btn-cancel', onclick: _closeModal },
           ]);
         } else {
           _showPlayerPicker('Mind-Link — Choose target', targets.map(id => GS.getPlayer(id)), targetId => {
-            GS.commitMindLink(targetId);
             _closeModal();
+            GS.commitMindLink(targetId);
           });
         }
       } else if (abilityName === 'Shadow-Plunder' && targets) {
         _showPlayerPicker('Shadow-Plunder — Choose target', targets.map(id => GS.getPlayer(id)), targetId => {
-          GS.commitShadowPlunder(targetId);
           _closeModal();
+          GS.commitShadowPlunder(targetId);
         });
       } else if (abilityName === 'Seeking Arrow' && targets) {
         _showPlayerPicker('Seeking Arrow — Choose target', targets.map(id => GS.getPlayer(id)), targetId => {
-          GS.commitSeekingArrow(targetId);
           _closeModal();
+          GS.commitSeekingArrow(targetId);
         });
       }
     } else if (subphase === 'target_select') {
       if (targets) {
         _showPlayerPicker('Choose target to attack', targets.map(id => GS.getPlayer(id)), targetId => {
-          GS.commitAttack(targetId);
           _closeModal();
+          GS.commitAttack(targetId);
         });
       }
     }

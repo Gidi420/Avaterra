@@ -8,7 +8,7 @@ window.addEventListener('DOMContentLoaded', () => {
     type: Phaser.AUTO,
     width:  820,
     height: 560,
-    backgroundColor: '#0a0a18',
+    backgroundColor: '#1a1a2e',
     parent: 'phaser-container',
     scene: [GameScene],
     scale: {

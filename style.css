@@ -475,8 +475,14 @@ html, body {
 }
 .btn-primary { background: var(--accent); color: #fff; border-color: #9a7cff; }
 .btn-primary:hover { background: #9a7cff; }
+.btn-secondary { background: #2a3a2a; color: #88cc88; border: 1px solid #4a7a4a; }
+.btn-secondary:hover { background: #3a4a3a; }
 .btn-cancel  { background: #2a2a4a; color: var(--text-dim); border-color: var(--panel-border); }
 .btn-cancel:hover { background: #3a3a5a; }
+.deck-count { margin-right: 10px; font-weight: bold; }
+.deck-count.tier-bronze { color: #ffcc88; }
+.deck-count.tier-silver { color: #aaccff; }
+.deck-count.tier-gold   { color: var(--gold); }
 .btn-bronze  { background: #5c3a1a; color: #ffcc88; }
 .btn-silver  { background: #2a3a5c; color: #aaccff; }
 .btn-gold    { background: #4a3a00; color: var(--gold); }

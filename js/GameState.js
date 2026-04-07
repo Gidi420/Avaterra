@@ -160,6 +160,12 @@ const GS = (() => {
   function _startPlayerTurn(player) {
     player.actionsLeft = player.actionsPerTurn;
     _drawCombatCardsForPlayer(player);
+    // Meadow: heal 1 HP at start of turn
+    const standingTile = getTile(player.tileId);
+    if (standingTile && standingTile.type === 'meadow' && !standingTile.removed) {
+      player.hp = Math.min(player.maxHp, player.hp + 1);
+      emit('log', `${player.name} rests in the Meadow and heals 1 HP.`);
+    }
     state.subphase = 'action_select';
     emit('state_changed', state);
     emit('log', `${player.name}'s turn begins (${player.actionsLeft} actions).`);
@@ -318,8 +324,18 @@ const GS = (() => {
         }
         break;
       case 'lava':
-        _dealDamage(player, null, 3);
-        emit('log', `${player.name} takes 3 damage from Lava!`);
+        _dealDamage(player, null, 1);
+        emit('log', `${player.name} takes 1 damage from Lava!`);
+        break;
+      case 'desert':
+        if (player.actionsLeft > 0) {
+          player.actionsLeft = Math.max(0, player.actionsLeft - 1);
+          emit('log', `${player.name} struggles through the Desert heat. Loses 1 Action.`);
+        }
+        break;
+      case 'meadow':
+        // Meadow heals at turn start (handled in _startPlayerTurn)
+        emit('log', `${player.name} enters a peaceful Meadow.`);
         break;
       case 'curse':
         const discard = Math.min(2, player.combatCards.length);
@@ -402,7 +418,13 @@ const GS = (() => {
     p.bonusDamageNext = 0;
     state.subphase = 'combat';
     emit('state_changed', state);
-    emit('combat_start', state.combat);
+    // If defender has no cards, resolve immediately
+    if (target.combatCards.length === 0) {
+      _resolveSeekingArrow();
+      return;
+    }
+    // Attacker picks which of defender's cards to destroy / block with
+    emit('combat_start', { ...state.combat, defenderHand: target.combatCards });
   }
 
   // ── Mind-Link (Lyra) ─────────────────────────────────────
@@ -606,8 +628,14 @@ const GS = (() => {
     }
 
     if (c.type === 'seeking_arrow') {
-      if (playerId !== c.defenderId) return;
-      c.defenderCard = cardUid;
+      // Attacker picks which card from defender's hand to destroy (blocking arrow), or null for full damage
+      if (playerId !== c.attackerId) return;
+      if (cardUid !== null) {
+        const def = getPlayer(c.defenderId);
+        const cardExists = def.combatCards.find(x => x.uid === cardUid);
+        if (!cardExists) return; // invalid card uid
+      }
+      c.defenderCard = cardUid; // null = no block
       _resolveSeekingArrow();
       return;
     }
@@ -680,7 +708,16 @@ const GS = (() => {
     const atkCard = atk.combatCards.find(x => x.uid === c.attackerCard);
     const defCard = def.combatCards.find(x => x.uid === c.defenderCard);
 
-    if (!atkCard || !defCard) { _endCombat(false); return; }
+    if (!atkCard || !defCard) {
+      if (atkCard && !defCard) {
+        // Defender concedes (no card) — attacker wins by default
+        atk.xp += 1;
+        if (atk.characterId === 'mason') { atk.xp += 1; emit('log', `${atk.name}'s Battle Hunger: +1 XP`); }
+        emit('log', `${def.name} has no combat card — ${atk.name} wins by default! +1 XP`);
+      }
+      _endCombat(false);
+      return;
+    }
 
     // Remove from hands
     atk.combatCards = atk.combatCards.filter(x => x.uid !== c.attackerCard);

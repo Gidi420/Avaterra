@@ -17,10 +17,24 @@ class GameScene extends Phaser.Scene {
     this.tileObjects  = {}; // tileId → { bg, label, icon, walls }
     this.playerTokens = {}; // playerId → container
     this.highlights   = []; // active highlight graphics
+    this.removalMarkers = {}; // tileId → graphics (warning indicator)
     this.boardBuilt   = false;
 
     // Store reference immediately so UI can access this scene
     window._gameScene = this;
+
+    // Camera pan: drag with right-click or middle-click
+    this.input.on('pointermove', pointer => {
+      if (pointer.isDown && (pointer.rightButtonDown() || pointer.middleButtonDown())) {
+        this.cameras.main.scrollX -= pointer.velocity.x / 2;
+        this.cameras.main.scrollY -= pointer.velocity.y / 2;
+      }
+    });
+    // Zoom with scroll wheel
+    this.input.on('wheel', (pointer, objs, dx, dy) => {
+      const cam = this.cameras.main;
+      cam.zoom = Phaser.Math.Clamp(cam.zoom - dy * 0.001, 0.5, 2.0);
+    });
 
     this._subscribeToEvents();
   }
@@ -292,6 +306,8 @@ class GameScene extends Phaser.Scene {
     GS.on('state_changed', () => {
       this._ensureBoardBuilt();
       this._repositionTokens();
+      const s = GS.getState();
+      if (s) this._updateRemovalMarkers(s.scheduledRemoval || []);
     });
 
     GS.on('player_eliminated', ({ playerId }) => {
@@ -314,9 +330,44 @@ class GameScene extends Phaser.Scene {
         }
       }
       if (subphase === 'target_select' && targets) {
-        // Highlight player tokens
         this.highlightPlayers(targets, 0xff4444);
       }
+    });
+
+    GS.on('round_changed', ({ scheduledRemoval }) => {
+      this._updateRemovalMarkers(scheduledRemoval || []);
+    });
+  }
+
+  // ── Scheduled-removal danger markers ─────────────────────
+  _updateRemovalMarkers(scheduledIds) {
+    // Clear old markers
+    Object.values(this.removalMarkers).forEach(m => m.destroy());
+    this.removalMarkers = {};
+
+    scheduledIds.forEach(tileId => {
+      const obj = this.tileObjects[tileId];
+      if (!obj) return;
+      const tile = GS.getTile(tileId);
+      if (!tile || tile.removed) return;
+      const { x, y } = this._tileXY(tile);
+      const gfx = this.add.graphics().setDepth(5);
+      // Pulsing orange border
+      gfx.lineStyle(4, 0xff6600, 0.9);
+      gfx.strokeRect(x - this.TILE_W / 2 + 2, y - this.TILE_H / 2 + 2, this.TILE_W - 4, this.TILE_H - 4);
+      // Warning text
+      const txt = this.add.text(x, y + this.TILE_H / 2 - 10, '⚠', {
+        fontSize: '13px', color: '#ff6600',
+      }).setOrigin(0.5).setDepth(6);
+      // Pulse tween
+      this.tweens.add({
+        targets: [gfx, txt],
+        alpha: { from: 1, to: 0.3 },
+        duration: 700,
+        yoyo: true,
+        repeat: -1,
+      });
+      this.removalMarkers[tileId] = { destroy: () => { gfx.destroy(); txt.destroy(); } };
     });
   }
 }
