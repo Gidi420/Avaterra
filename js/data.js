@@ -5,7 +5,7 @@
 // ── CHARACTERS ──────────────────────────────────────────────
 const CHARACTERS = [
   {
-    id: 'zephyr', name: 'Zephyr', lore: 'The Shadow Dancer',
+    id: 'cyan', name: 'Cyan', lore: 'The Scout',
     hp: 30, damage: 3, actionsPerTurn: 4,
     combatCardCapacity: 5, itemCapacity: 5,
     color: '#9b59b6', hexColor: 0x9b59b6,
@@ -16,11 +16,11 @@ const CHARACTERS = [
     upgrades: [
       { id: 'swift_step',  tier: 1, name: 'Swift Step',   desc: '+1 Action per turn.',            cost: 3, effect: { actions: 1 } },
       { id: 'card_master', tier: 2, name: 'Card Mastery', desc: '+1 Combat Card Capacity.',        cost: 4, effect: { combatCardCap: 1 } },
-      { id: 'phase_walk',  tier: 3, name: 'Phase Walk',   desc: 'Veil-Step ignores walls/removed tiles.', cost: 6, effect: { flag: 'throughWalls' } },
+      { id: 'phase_walk',  tier: 3, name: 'Spirit Walk',  desc: 'Veil-Step can now move through walls and removed tiles.', cost: 6, effect: { flag: 'throughWalls' } },
     ],
   },
   {
-    id: 'lyra', name: 'Lyra', lore: 'The Mind Weaver',
+    id: 'indigo', name: 'Indigo', lore: 'The Tactician',
     hp: 27, damage: 3, actionsPerTurn: 4,
     combatCardCapacity: 5, itemCapacity: 5,
     color: '#3498db', hexColor: 0x3498db,
@@ -29,13 +29,13 @@ const CHARACTERS = [
     abilityType: 'active', abilityCost: { combatCards: 1 },
     limitation: 'Target gains 1 resistance against you for the round.',
     upgrades: [
-      { id: 'clarity',    tier: 1, name: 'Clarity',    desc: '+1 Action per turn.',           cost: 3, effect: { actions: 1 } },
-      { id: 'collector',  tier: 2, name: 'Collector',  desc: '+1 Item Capacity.',              cost: 4, effect: { itemCap: 1 } },
-      { id: 'deep_probe', tier: 3, name: 'Deep Probe', desc: 'Mind-Link targets two players for 1 card.', cost: 6, effect: { flag: 'twoTargets' } },
+      { id: 'clarity',    tier: 1, name: 'Clarity',           desc: '+1 Action per turn.',           cost: 3, effect: { actions: 1 } },
+      { id: 'collector',  tier: 2, name: 'Collector',         desc: '+1 Item Capacity.',              cost: 4, effect: { itemCap: 1 } },
+      { id: 'deep_probe', tier: 3, name: 'Greater Communion', desc: 'Mind-Link can now target two players for 1 Combat Card.', cost: 6, effect: { flag: 'twoTargets' } },
     ],
   },
   {
-    id: 'kael', name: 'Kael', lore: 'The Shadow Plunderer',
+    id: 'gold', name: 'Gold', lore: 'The Rogue',
     hp: 33, damage: 2, actionsPerTurn: 4,
     combatCardCapacity: 5, itemCapacity: 5,
     color: '#2ecc71', hexColor: 0x2ecc71,
@@ -44,71 +44,73 @@ const CHARACTERS = [
     abilityType: 'active', abilityCost: { combatCards: 1 },
     limitation: 'Opponents can block this ability.',
     upgrades: [
-      { id: 'nimble',      tier: 1, name: 'Nimble',      desc: '+1 Action per turn.',      cost: 3, effect: { actions: 1 } },
-      { id: 'brutality',   tier: 2, name: 'Brutality',   desc: '+1 Damage.',               cost: 4, effect: { damage: 1 } },
-      { id: 'grand_theft', tier: 3, name: 'Grand Theft', desc: 'Shadow-Plunder steals 2 items.', cost: 6, effect: { flag: 'steals2' } },
+      { id: 'nimble',      tier: 1, name: 'Nimble',           desc: '+1 Action per turn.',      cost: 3, effect: { actions: 1 } },
+      { id: 'brutality',   tier: 2, name: 'Brutality',        desc: '+1 Damage.',               cost: 4, effect: { damage: 1 } },
+      { id: 'grand_theft', tier: 3, name: 'Grand Usurpation', desc: 'Shadow-Plunder now steals 2 random items.', cost: 6, effect: { flag: 'steals2' } },
     ],
   },
   {
-    id: 'mason', name: 'Mason', lore: 'The Battle Hungry',
+    id: 'walnut', name: 'Walnut', lore: 'The Warrior',
     hp: 30, damage: 3, actionsPerTurn: 4,
     combatCardCapacity: 5, itemCapacity: 4,
     color: '#e67e22', hexColor: 0xe67e22,
-    abilityName: 'Battle Hunger',
+    abilityName: 'Rites of Discipline',
     abilityDesc: 'Passive: Gain +1 XP from winning PvP combat and +1 XP from winning a hunt.',
     abilityType: 'passive', abilityCost: {},
-    limitation: 'Gaining "Berserker" upgrade reduces item capacity to 3.',
+    limitation: 'Gaining "Ascendant Mastery" upgrade reduces item capacity to 3.',
     upgrades: [
-      { id: 'warriors_path', tier: 1, name: "Warrior's Path", desc: '+1 Action per turn.',           cost: 3, effect: { actions: 1 } },
-      { id: 'extra_slot',    tier: 2, name: 'Extra Slot',     desc: '+1 Combat Card Capacity.',       cost: 4, effect: { combatCardCap: 1 } },
-      { id: 'berserker',     tier: 3, name: 'Berserker',      desc: 'Spend 2 XP at combat start for +1 Dmg or +1 Res (stackable). Item cap → 3.', cost: 6, effect: { flag: 'berserker', itemCapDelta: -1 } },
+      { id: 'warriors_path', tier: 1, name: "Warrior's Path",    desc: '+1 Action per turn.',           cost: 3, effect: { actions: 1 } },
+      { id: 'extra_slot',    tier: 2, name: 'Extra Slot',        desc: '+1 Combat Card Capacity.',       cost: 4, effect: { combatCardCap: 1 } },
+      { id: 'berserker',     tier: 3, name: 'Ascendant Mastery', desc: 'Spend 2 XP at combat start for +1 Dmg or +1 Res (stackable). Item cap → 3.', cost: 6, effect: { flag: 'berserker', itemCapDelta: -1 } },
     ],
   },
   {
-    id: 'vesper', name: 'Vesper', lore: 'The Blood Mage',
+    id: 'red', name: 'Red', lore: 'The Vampire',
     hp: 25, damage: 3, actionsPerTurn: 4,
     combatCardCapacity: 5, itemCapacity: 4,
     color: '#e74c3c', hexColor: 0xe74c3c,
     abilityName: 'Sanguine Ritual',
     abilityDesc: 'Spend 2 Actions at the start of combat. If you win that combat, recover 2 HP.',
     abilityType: 'pre-combat', abilityCost: { actions: 2 },
-    limitation: 'Cannot exceed starting Max HP. Healing Potion gives 2 HP; Grand Elixir gives 4 HP.',
+    limitation: 'Cannot exceed starting Max HP. Small Potion gives 2 HP; Super Potion gives 4 HP.',
     upgrades: [
-      { id: 'bloodlust',   tier: 1, name: 'Bloodlust',   desc: '+1 Combat Card Capacity.',   cost: 3, effect: { combatCardCap: 1 } },
-      { id: 'vitality',    tier: 2, name: 'Vitality',    desc: '+1 Action per turn.',         cost: 4, effect: { actions: 1 } },
-      { id: 'blood_feast', tier: 3, name: 'Blood Feast', desc: 'Sanguine Ritual win also grants +1 Action this turn.', cost: 6, effect: { flag: 'bonusAction' } },
+      { id: 'bloodlust',   tier: 1, name: 'Bloodlust',       desc: '+1 Combat Card Capacity.',   cost: 3, effect: { combatCardCap: 1 } },
+      { id: 'vitality',    tier: 2, name: 'Vitality',        desc: '+1 Action per turn.',         cost: 4, effect: { actions: 1 } },
+      { id: 'blood_feast', tier: 3, name: 'Blood Awakening', desc: 'Winning after Sanguine Ritual grants +1 Action this turn in addition to the 2 HP.', cost: 6, effect: { flag: 'bonusAction' } },
     ],
   },
   {
-    id: 'soren', name: 'Soren', lore: 'The Master Archer',
+    id: 'green', name: 'Green', lore: 'The Marksman',
     hp: 30, damage: 2, actionsPerTurn: 4,
     combatCardCapacity: 5, itemCapacity: 4,
     color: '#1abc9c', hexColor: 0x1abc9c,
     abilityName: 'Seeking Arrow',
     abilityDesc: 'Spend 2 Actions to fire at a player on an adjacent tile for 4 damage. They may block but cannot counter.',
     abilityType: 'active', abilityCost: { actions: 2 },
-    limitation: 'Takes +1 damage from close-range attacks. Deals only 2 damage on close-range attacks.',
+    limitation: 'Takes +1 damage from close-range PvP attacks. Deals only 2 damage in close-range PvP.',
     upgrades: [
-      { id: 'fleet_foot',     tier: 1, name: 'Fleet Foot',     desc: '+1 Action per turn.',                                     cost: 3, effect: { actions: 1 } },
-      { id: 'precision',      tier: 2, name: 'Precision',      desc: '+1 Damage to attacks on your current tile (Point-Blank).', cost: 4, effect: { flag: 'pointBlank' } },
-      { id: 'pierce_arrow',   tier: 3, name: 'Piercing Arrow', desc: 'Seeking Arrow fires through walls; targets two enemies on same tile.', cost: 6, effect: { flag: 'pierce' } },
+      { id: 'fleet_foot',   tier: 1, name: 'Fleet Foot',   desc: '+1 Action per turn.',                                     cost: 3, effect: { actions: 1 } },
+      { id: 'precision',    tier: 2, name: 'Point-Blank',  desc: '+1 Damage to attacks on your current tile.',               cost: 4, effect: { flag: 'pointBlank' } },
+      { id: 'pierce_arrow', tier: 3, name: 'Phantom Bolt', desc: 'Seeking Arrow can now fire through walls and target two opponents on the same tile at once.', cost: 6, effect: { flag: 'pierce' } },
     ],
   },
 ];
 
 // ── TILE TYPES ───────────────────────────────────────────────
-// Tile counts: forest×3, desert×3, meadow×3, tower×2, fortress×2, swamp×2, vault×2, lava×2, curse×2, plain×3 = 24
+// Tile counts: forest×3, swamp×3, desert×3, meadow×3, mountains×2, frozen_tundra×2, city×2, tower×2, wasteland×2, cave×2 = 24
 const TILE_TYPE_DATA = {
-  forest:   { label: 'Forest',   color: 0x1a5c2a, textColor: '#7dff9b', icon: '🌲', hasMonsters: true,  desc: 'Spend 1 Action to Hunt a monster and earn an item.' },
-  desert:   { label: 'Desert',   color: 0x7a5a20, textColor: '#ffe599', icon: '🏜', hasMonsters: true,  desc: 'Spend 1 Action to Hunt a monster and earn an item. Moving in costs 1 extra Action.' },
-  meadow:   { label: 'Meadow',   color: 0x2a5c1a, textColor: '#ccff88', icon: '🌸', hasMonsters: true,  desc: 'Spend 1 Action to Hunt. Recover 1 HP at the start of your turn if standing here.' },
-  tower:    { label: 'Tower',    color: 0x8b6914, textColor: '#ffe066', icon: '🏛',  hasMonsters: false, desc: 'Spend 1 Action: teleport to other Tower. Or spend 1 Action to heal 3 HP (once per game).' },
-  fortress: { label: 'Fortress', color: 0x3a3a4a, textColor: '#aaaacc', icon: '🏰', hasMonsters: false, desc: 'Must be drawn from the bag TWICE before it can be removed.' },
-  swamp:    { label: 'Swamp',    color: 0x1a3a30, textColor: '#66ffcc', icon: '🌿', hasMonsters: false, desc: 'Lose 1 Action immediately when you move onto or through this tile.' },
-  vault:    { label: 'Vault',    color: 0x3a1a5c, textColor: '#cc88ff', icon: '💎', hasMonsters: false, desc: 'Pay 1 XP to enter. On rounds 7, 10, 13: entering grants a free item.' },
-  lava:     { label: 'Lava',     color: 0x5c1a1a, textColor: '#ff6666', icon: '🌋', hasMonsters: false, desc: 'Lose 1 HP immediately upon entering.' },
-  curse:    { label: 'Cursed',   color: 0x4a1a4a, textColor: '#ff88ff', icon: '💀', hasMonsters: false, desc: 'Discard 2 Combat Cards of your choice upon entering.' },
-  plain:    { label: 'Plain',    color: 0x2a2010, textColor: '#ddcc88', icon: '⬜', hasMonsters: false, desc: 'No special effect.' },
+  // Standard terrains (3 each, huntable)
+  forest:        { label: 'Forest',        color: 0x1a5c2a, textColor: '#7dff9b', icon: '🌲', hasMonsters: true,  desc: 'Spend 1 Action to Hunt a monster and earn an item.' },
+  swamp:         { label: 'Swamp',         color: 0x1a3a30, textColor: '#66ffcc', icon: '🌿', hasMonsters: true,  desc: 'Spend 1 Action to Hunt a monster and earn an item.' },
+  desert:        { label: 'Desert',        color: 0x7a5a20, textColor: '#ffe599', icon: '🏜', hasMonsters: true,  desc: 'Spend 1 Action to Hunt a monster and earn an item.' },
+  meadow:        { label: 'Meadow',        color: 0x2a5c1a, textColor: '#ccff88', icon: '🌸', hasMonsters: true,  desc: 'Spend 1 Action to Hunt. Recover 1 HP at the start of your turn if standing here.' },
+  // Special terrains
+  mountains:     { label: 'Mountains',     color: 0x3a3a4a, textColor: '#aaaacc', icon: '⛰',  hasMonsters: false, desc: 'Must be drawn from the bag TWICE before it can be removed.' },
+  frozen_tundra: { label: 'Frozen Tundra', color: 0x2a3a5c, textColor: '#aaccff', icon: '❄',  hasMonsters: false, desc: 'Lose 1 Action immediately when you move onto this tile.' },
+  city:          { label: 'City',          color: 0x3a1a5c, textColor: '#cc88ff', icon: '🏙',  hasMonsters: false, desc: 'Pay 1 XP to enter. On rounds 7, 10, 13: entering grants a free item.' },
+  tower:         { label: 'Magic Tower',   color: 0x8b6914, textColor: '#ffe066', icon: '🏛',  hasMonsters: false, desc: 'Spend 1 Action: teleport to other Tower, or heal 3 HP (once per game).' },
+  wasteland:     { label: 'Wasteland',     color: 0x5c1a1a, textColor: '#ff6666', icon: '💀', hasMonsters: false, desc: 'Lose 1 HP immediately upon entering.' },
+  cave:          { label: 'Cave',          color: 0x4a1a4a, textColor: '#ff88ff', icon: '🕳',  hasMonsters: false, desc: 'Discard 1 Combat Card of your choice upon entering.' },
 };
 
 // Board tile positions (row, col in a 8-wide virtual grid)
@@ -129,62 +131,59 @@ const TILE_LAYOUT = [
 ];
 // Total: 2+4+6+6+4+2 = 24 ✓
 
-// Tiles that have wall configurations (rotation matters)
-const WALLED_TILE_IDS = [3, 8, 9, 14, 15, 20];
+// Tiles that always have walls (by type). Standard terrains: 1 of each type gets walls during init.
+const ALWAYS_WALLED_TYPES = ['city', 'tower', 'wasteland', 'cave'];
+const STANDARD_TERRAIN_TYPES = ['forest', 'swamp', 'desert', 'meadow'];
 
 // Tile type distribution (shuffled at game start)
 const TILE_TYPE_POOL = [
   'forest','forest','forest',
+  'swamp','swamp','swamp',
   'desert','desert','desert',
   'meadow','meadow','meadow',
+  'mountains','mountains',
+  'frozen_tundra','frozen_tundra',
+  'city','city',
   'tower','tower',
-  'fortress','fortress',
-  'swamp','swamp',
-  'vault','vault',
-  'lava','lava',
-  'curse','curse',
-  'plain','plain','plain',
+  'wasteland','wasteland',
+  'cave','cave',
 ]; // 24 total
 
 // ── ITEMS ────────────────────────────────────────────────────
 const ITEMS = [
-  // ── BRONZE (10 types × 3 copies = 30, plus 2 extra copies of Healing Potion + Battle Surge = 36) ──
-  { id: 'disarm',          tier: 'bronze', name: 'Disarm',          icon: '🧠', desc: 'Force an opponent to discard 1 Combat Card of your choice.',                       timing: 'own_turn',   effect: 'mind_drain' },
-  { id: 'healing_potion',  tier: 'bronze', name: 'Healing Potion',  icon: '🧪', desc: 'Restore 3 HP (Vesper: only 2 HP).',                                                 timing: 'own_turn',   effect: 'heal',       value: 3 },
-  { id: 'shockwave',       tier: 'bronze', name: 'Shockwave',       icon: '💥', desc: 'Push a player on your tile to any adjacent tile (ignores walls).',                 timing: 'own_turn',   effect: 'push' },
-  { id: 'swift_boots',     tier: 'bronze', name: 'Swift Boots',     icon: '👟', desc: 'Move 1 space in any legal direction for free (no Action cost).',                   timing: 'own_turn',   effect: 'free_move' },
-  { id: 'shield',          tier: 'bronze', name: 'Shield',          icon: '🛡', desc: 'Defensive: play when attacked to block the hit. Combat ends immediately, no damage.', timing: 'reaction', effect: 'shield', defensive: true },
-  { id: 'terrain_rotator', tier: 'bronze', name: 'Terrain Rotator', icon: '🔄', desc: 'Rotate a walled tile in any direction.',                                            timing: 'own_turn',   effect: 'rotate_tile' },
-  { id: 'sabotage',        tier: 'bronze', name: 'Sabotage',        icon: '🔨', desc: "Destroy one of an opponent's items at random.",                                     timing: 'own_turn',   effect: 'destroy_item' },
-  { id: 'crystal_eye',     tier: 'bronze', name: 'Crystal Eye',     icon: '👁',  desc: "Look at an opponent's Combat Card hand.",                                           timing: 'own_turn',   effect: 'peek_hand' },
-  { id: 'battle_surge',    tier: 'bronze', name: 'Battle Surge',    icon: '⚔',  desc: 'Your next successful attack deals +2 extra damage.',                                timing: 'own_turn',   effect: 'battle_surge', value: 2 },
-  { id: 'soul_gem',        tier: 'bronze', name: 'Soul Gem',        icon: '✨',  desc: 'Instantly gain 2 XP.',                                                              timing: 'own_turn',   effect: 'gain_xp',    value: 2 },
-
-  // ── SILVER (12 types × 3 copies = 36) ──
-  { id: 'warp_stone',      tier: 'silver', name: 'Warp Stone',      icon: '🌀', desc: 'Instantly teleport to any available tile on the board.',                           timing: 'own_turn',   effect: 'teleport' },
-  { id: 'counter_stance',  tier: 'silver', name: 'Counter Stance',  icon: '🔀', desc: 'Defensive: play when attacked to immediately swap roles and become the Attacker.',  timing: 'reaction',   effect: 'counter_stance', defensive: true },
-  { id: 'iron_armor',      tier: 'silver', name: 'Iron Armor',      icon: '🧲', desc: 'Take -2 damage from all sources until the start of your next turn.',               timing: 'reaction',   effect: 'iron_armor', value: 2, defensive: true },
-  { id: 'phantom_strike',  tier: 'silver', name: 'Phantom Strike',  icon: '🏹', desc: 'Attack an opponent 1 tile away. They cannot counter; they can only block or take damage.', timing: 'own_turn', effect: 'ranged_attack' },
-  { id: 'archaeologist',   tier: 'silver', name: 'Archaeologist',   icon: '⛏',  desc: 'Pick up any Bronze item from the discard pile.',                                   timing: 'own_turn',   effect: 'salvage' },
-  { id: 'grand_elixir',    tier: 'silver', name: 'Grand Elixir',    icon: '🔮', desc: 'Restore 6 HP (Vesper: only 4 HP).',                                                timing: 'own_turn',   effect: 'heal',       value: 6 },
-  { id: 'banishment',      tier: 'silver', name: 'Banishment',      icon: '🌪',  desc: 'Move an opponent from their tile to any other tile on the board.',                timing: 'own_turn',   effect: 'displace' },
-  { id: 'world_shaper',    tier: 'silver', name: 'World Shaper',    icon: '🗺',  desc: 'Remove a tile from the board OR restore a previously removed tile.',              timing: 'own_turn',   effect: 'world_shaper' },
-  { id: 'time_stop',       tier: 'silver', name: 'Time Stop',       icon: '⏱',  desc: "End an opponent's turn immediately.",                                              timing: 'own_turn',   effect: 'time_stop' },
-  { id: 'ethereal_blade',  tier: 'silver', name: 'Ethereal Blade',  icon: '🗡',  desc: 'Your next successful attack deals +4 extra damage.',                              timing: 'own_turn',   effect: 'battle_surge', value: 4 },
-  { id: 'mass_confusion',  tier: 'silver', name: 'Mass Confusion',  icon: '🌀', desc: 'All players on your tile (except you) each discard 1 Combat Card.',               timing: 'own_turn',   effect: 'mass_confusion' },
-  { id: 'rally',           tier: 'silver', name: 'Rally',           icon: '📣', desc: 'Draw Combat Cards up to your capacity immediately (no Action or XP cost).',       timing: 'own_turn',   effect: 'free_draw' },
-
-  // ── GOLD (6 types × 2 copies = 12) ──
-  { id: 'godslayer',       tier: 'gold', name: 'Godslayer',       icon: '⚡', desc: 'Your next successful attack deals +5 extra damage.',                              timing: 'own_turn',   effect: 'battle_surge', value: 5 },
-  { id: 'phoenix_feather', tier: 'gold', name: 'Phoenix Feather', icon: '🔥', desc: 'Restore 10 HP.',                                                                  timing: 'own_turn',   effect: 'heal',       value: 10 },
-  { id: 'void_rift',       tier: 'gold', name: 'Void Rift',       icon: '🕳',  desc: 'Teleport yourself to any tile AND move one opponent to any tile.',               timing: 'own_turn',   effect: 'void_rift' },
-  { id: 'chaos_orb',       tier: 'gold', name: 'Chaos Orb',       icon: '🌑', desc: 'All other players immediately discard their entire Combat Card hand.',            timing: 'own_turn',   effect: 'chaos_orb' },
-  { id: 'titan_armor',     tier: 'gold', name: "Titan's Armor",   icon: '🔰', desc: 'Take -4 damage from all sources until the start of your next turn.',             timing: 'reaction',   effect: 'iron_armor', value: 4, defensive: true },
-  { id: 'blink_strike',    tier: 'gold', name: 'Blink Strike',    icon: '🗡',  desc: 'Attack any player on any tile on the board. They cannot counter — only block.', timing: 'own_turn',   effect: 'blink_strike' },
+  // ── Bronze (6 types × 6 copies = 36) ───────────────────────
+  { id: 'disarm',          tier: 'bronze', name: 'Disarm',          icon: '⚔',  desc: 'Force an opponent to discard 1 Combat Card of your choice.',                       timing: 'own_turn',  effect: 'mind_drain' },
+  { id: 'small_potion',    tier: 'bronze', name: 'Small Potion',    icon: '🧪', desc: 'Restore 3 HP. (Red: only 2 HP).',                                                   timing: 'own_turn',  effect: 'heal',         value: 3 },
+  { id: 'push',            tier: 'bronze', name: 'Push',            icon: '💥', desc: 'Push a player on your tile to any adjacent tile (ignores walls).',                  timing: 'own_turn',  effect: 'push' },
+  { id: 'freestep',        tier: 'bronze', name: 'Freestep',        icon: '👟', desc: 'Move 1 space in any legal direction for free (no Action cost).',                    timing: 'own_turn',  effect: 'free_move' },
+  { id: 'shield',          tier: 'bronze', name: 'Shield',          icon: '🛡', desc: 'Defensive: play when attacked to block the hit. Combat ends immediately, no damage.', timing: 'reaction', effect: 'shield',       defensive: true },
+  { id: 'rotate_tile',     tier: 'bronze', name: 'Rotate Tile',     icon: '🔄', desc: 'Rotate a walled tile in any direction to change the board\'s paths.',              timing: 'own_turn',  effect: 'rotate_tile' },
+  // ── Silver (9 types × 4 copies = 36) ───────────────────────
+  { id: 'vandalism',       tier: 'silver', name: 'Vandalism',       icon: '🔨', desc: 'Destroy one of an opponent\'s items at random.',                                    timing: 'own_turn',  effect: 'destroy_item' },
+  { id: 'peek',            tier: 'silver', name: 'Peek',            icon: '👁',  desc: 'Look at an opponent\'s Combat Card hand.',                                          timing: 'own_turn',  effect: 'peek_hand' },
+  { id: 'damage_modifier', tier: 'silver', name: 'Damage Modifier', icon: '🗡',  desc: 'Add +2 Damage to your next successful attack.',                                    timing: 'own_turn',  effect: 'battle_surge', value: 2 },
+  { id: 'growth',          tier: 'silver', name: 'Growth',          icon: '🌱', desc: 'Instantly gain 2 XP.',                                                              timing: 'own_turn',  effect: 'gain_xp',      value: 2 },
+  { id: 'teleport',        tier: 'silver', name: 'Teleport',        icon: '🌀', desc: 'Move your character to any available tile on the board instantly.',                 timing: 'own_turn',  effect: 'teleport' },
+  { id: 'swap_roles',      tier: 'silver', name: 'Swap Roles',      icon: '🔀', desc: 'Defensive: play when attacked to immediately swap roles and become the Attacker.',  timing: 'reaction',  effect: 'counter_stance', defensive: true },
+  { id: 'armor',           tier: 'silver', name: 'Armor',           icon: '🧲', desc: 'Take -2 damage from all sources until the start of your next turn.',               timing: 'reaction',  effect: 'iron_armor',   value: 2, defensive: true },
+  { id: 'long_range_strike',tier: 'silver',name: 'Long-Range Strike',icon: '🏹', desc: 'Attack an opponent 1 tile away. They cannot counter; can only block or take damage.', timing: 'own_turn', effect: 'ranged_attack' },
+  { id: 'trash',           tier: 'silver', name: 'Trash',           icon: '⛏',  desc: 'Pick up any Bronze item from the discard pile.',                                   timing: 'own_turn',  effect: 'salvage' },
+  // ── Gold (4 types × 3 copies = 12) ─────────────────────────
+  { id: 'super_potion',    tier: 'gold',   name: 'Super Potion',    icon: '🔮', desc: 'Restore 6 HP. (Red: only 4 HP).',                                                   timing: 'own_turn',  effect: 'heal',         value: 6 },
+  { id: 'kidnapping',      tier: 'gold',   name: 'Kidnapping',      icon: '🌪',  desc: 'Move an opponent from their current tile to any other tile on the board.',         timing: 'own_turn',  effect: 'displace' },
+  { id: 'terrain_mod',     tier: 'gold',   name: 'Terrain Mod',     icon: '🗺',  desc: 'Remove a tile from the board OR restore a previously removed tile.',              timing: 'own_turn',  effect: 'world_shaper' },
+  { id: 'stun',            tier: 'gold',   name: 'Stun',            icon: '⏱',  desc: "End an opponent's turn immediately.",                                              timing: 'own_turn',  effect: 'time_stop' },
 ];
 
 // IDs that get extra copies so totals match rulebook (bronze=36, silver=36, gold=12)
-const ITEM_EXTRA_COPIES = { healing_potion: 2, battle_surge: 2, grand_elixir: 2, counter_stance: 2, godslayer: 2, phoenix_feather: 2 };
+const ITEM_EXTRA_COPIES = {
+  // Bronze: base 3, need 6 total → +3 each
+  disarm: 3, small_potion: 3, push: 3, freestep: 3, shield: 3, rotate_tile: 3,
+  // Silver: base 3, need 4 total → +1 each
+  vandalism: 1, peek: 1, damage_modifier: 1, growth: 1, teleport: 1, swap_roles: 1, armor: 1, long_range_strike: 1, trash: 1,
+  // Gold: base 2, need 3 total → +1 each
+  super_potion: 1, kidnapping: 1, terrain_mod: 1, stun: 1,
+};
 
 function buildItemDeck() {
   const deck = [];

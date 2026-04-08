@@ -41,6 +41,7 @@ const UI = (() => {
     GS.on('player_eliminated',     _onPlayerEliminated);
     GS.on('mind_drain_prompt',     _onMindDrainPrompt);
     GS.on('rotate_prompt',         _onRotatePrompt);
+    GS.on('cave_discard_prompt',   _onCaveDiscardPrompt);
   }
 
   // ══════════════════════════════════════════════════════════
@@ -337,11 +338,11 @@ const UI = (() => {
     const char = CHARACTERS.find(c => c.id === p.characterId);
     if (!char) return false;
     if (char.abilityType === 'passive') return false;
-    if (p.characterId === 'zephyr') return p.actionsLeft >= 1;
-    if (p.characterId === 'lyra')   return p.combatCards.length >= 1;
-    if (p.characterId === 'kael')   return p.combatCards.length >= 1 && _playersOnSameTile(p);
-    if (p.characterId === 'vesper') return p.actionsLeft >= 2;
-    if (p.characterId === 'soren')  return p.actionsLeft >= 2 && _adjacentEnemies(p).length > 0;
+    if (p.characterId === 'cyan')   return p.actionsLeft >= 1;
+    if (p.characterId === 'indigo') return p.combatCards.length >= 1;
+    if (p.characterId === 'gold')   return p.combatCards.length >= 1 && _playersOnSameTile(p);
+    if (p.characterId === 'red')    return p.actionsLeft >= 2;
+    if (p.characterId === 'green')  return p.actionsLeft >= 2 && _adjacentEnemies(p).length > 0;
     return false;
   }
 
@@ -364,11 +365,11 @@ const UI = (() => {
   }
 
   function _useAbility(p) {
-    if (p.characterId === 'zephyr') GS.beginVeilStep();
-    else if (p.characterId === 'lyra')  GS.beginMindLink();
-    else if (p.characterId === 'kael')  GS.beginShadowPlunder();
-    else if (p.characterId === 'vesper') GS.activateSanguineRitual();
-    else if (p.characterId === 'soren') GS.beginSeekingArrow();
+    if (p.characterId === 'cyan')   GS.beginVeilStep();
+    else if (p.characterId === 'indigo') GS.beginMindLink();
+    else if (p.characterId === 'gold')   GS.beginShadowPlunder();
+    else if (p.characterId === 'red')    GS.activateSanguineRitual();
+    else if (p.characterId === 'green')  GS.beginSeekingArrow();
   }
 
   function _confirmEndTurn() {
@@ -415,7 +416,7 @@ const UI = (() => {
     }
 
     if (item.effect === 'mind_drain' || item.effect === 'destroy_item' || item.effect === 'peek_hand' ||
-        item.effect === 'push' || item.effect === 'displace' || item.effect === 'mass_confusion') {
+        item.effect === 'push' || item.effect === 'displace' || item.effect === 'time_stop') {
       // Needs target
       const others = s.players.filter(t => t.alive && t.id !== p.id);
       if (others.length === 0) { _toast('No opponents.', 'info'); return; }
@@ -779,6 +780,18 @@ const UI = (() => {
       !towerUsed ? { label: '❤ Heal 3 HP (1 AP, once per game)', cls: 'btn-primary', onclick: () => { GS.commitTowerAction('heal'); _closeModal(); }} : null,
       { label: 'Cancel', cls: 'btn-cancel', onclick: _closeModal },
     ].filter(Boolean));
+  }
+
+  function _onCaveDiscardPrompt({ playerId, hand }) {
+    const p = GS.getPlayer(playerId);
+    let html = `<p><b>${p.name}</b> enters the Cave! Discard 1 Combat Card of your choice:</p><div class="hand-reveal">`;
+    hand.forEach(card => {
+      html += `<button class="combat-card-mini selectable" style="background:${COMBAT_CARD_COLORS[card.type]};cursor:pointer;padding:6px 10px;"
+        onclick="GS.resolveCaveDiscard('${card.uid}'); UI._closeModal();">
+        ${COMBAT_CARD_ICONS[card.type]} ${card.type}</button>`;
+    });
+    html += '</div>';
+    _showModal('⛰ Cave', html, []);
   }
 
   function _onMindDrainPrompt({ attackerId, defenderId }) {

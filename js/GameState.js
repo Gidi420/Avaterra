@@ -23,18 +23,30 @@ const GS = (() => {
   function init(playerSetups) {
     // playerSetups: [{name, characterId}, ...]
     const types = shuffle([...TILE_TYPE_POOL]);
+    // Determine which tiles get walls based on type
+    const standardWallGiven = {};
+    const walledIndices = new Set();
+    types.forEach((type, i) => {
+      if (ALWAYS_WALLED_TYPES.includes(type)) {
+        walledIndices.add(i);
+      } else if (STANDARD_TERRAIN_TYPES.includes(type) && !standardWallGiven[type]) {
+        standardWallGiven[type] = true;
+        walledIndices.add(i);
+      }
+    });
+
     const tiles = TILE_LAYOUT.map((pos, i) => {
       const type = types[i];
-      const isWalled = WALLED_TILE_IDS.includes(pos.id);
+      const isWalled = walledIndices.has(i);
       return {
         ...pos,
         type,
         hasWalls:     isWalled,
-        wallConfig:   isWalled ? 0b0101 : 0, // default: north+south walls
+        wallConfig:   isWalled ? 0b0101 : 0,
         wallRotation: isWalled ? Math.floor(Math.random() * 4) : 0,
         removed:      false,
-        drawCount:    0, // for fortress tiles
-        hasMonster:   type === 'forest',
+        drawCount:    0, // for mountains tiles
+        hasMonster:   STANDARD_TERRAIN_TYPES.includes(type),
       };
     });
 
@@ -189,7 +201,7 @@ const GS = (() => {
       let chipId = state.terrainBag.pop();
       // Fortress: must be drawn twice
       const tile = getTile(chipId);
-      if (tile && tile.type === 'fortress' && !state.fortressDrawn[chipId]) {
+      if (tile && tile.type === 'mountains' && !state.fortressDrawn[chipId]) {
         state.fortressDrawn[chipId] = true;
         // Put back and draw another
         state.terrainBag.unshift(chipId);
@@ -232,9 +244,9 @@ const GS = (() => {
     state.freeItemTier  = d.freeItemTier;
     state.freeItemCount = d.freeItemCount;
     if (state.freeItemRound) {
-      // Mark vault/specific tile as having free item
-      const vaults = state.tiles.filter(t => t.type === 'vault' && !t.removed);
-      if (vaults.length > 0) state.freeItemTileId = vaults[0].id;
+      // Mark city/specific tile as having free item
+      const cities = state.tiles.filter(t => t.type === 'city' && !t.removed);
+      if (cities.length > 0) state.freeItemTileId = cities[0].id;
     }
   }
 
@@ -299,60 +311,51 @@ const GS = (() => {
   function _applyTileEffect(player, tile) {
     if (!tile || tile.removed) return;
     switch (tile.type) {
-      case 'swamp':
+      case 'frozen_tundra':
         if (player.actionsLeft > 0) {
           player.actionsLeft = Math.max(0, player.actionsLeft - 1);
-          emit('log', `${player.name} enters swamp and loses 1 Action.`);
+          emit('log', `${player.name} enters Frozen Tundra and loses 1 Action.`);
         }
         break;
-      case 'vault':
+      case 'city':
         if (state.freeItemRound && tile.id === state.freeItemTileId) {
           for (let i = 0; i < state.freeItemCount; i++) {
             const item = _drawItem(state.freeItemTier);
             if (item) _giveItem(player, item);
           }
-          emit('log', `${player.name} receives ${state.freeItemCount} free item(s) from the Vault!`);
-          state.freeItemRound = false; // consumed
+          emit('log', `${player.name} receives ${state.freeItemCount} free item(s) from the City!`);
+          state.freeItemRound = false;
         } else {
-          // Must pay 1 XP
           if (player.xp < 1) {
-            emit('log', `${player.name} cannot afford the Vault entry cost (1 XP). Moving back is not allowed in this phase.`);
+            emit('log', `${player.name} cannot afford the City entry cost (1 XP).`);
           } else {
             player.xp -= 1;
-            emit('log', `${player.name} pays 1 XP to enter the Vault.`);
+            emit('log', `${player.name} pays 1 XP to enter the City.`);
           }
         }
         break;
-      case 'lava':
+      case 'wasteland':
         _dealDamage(player, null, 1);
-        emit('log', `${player.name} takes 1 damage from Lava!`);
+        emit('log', `${player.name} takes 1 damage from the Wasteland!`);
         break;
-      case 'desert':
-        if (player.actionsLeft > 0) {
-          player.actionsLeft = Math.max(0, player.actionsLeft - 1);
-          emit('log', `${player.name} struggles through the Desert heat. Loses 1 Action.`);
+      case 'cave':
+        if (player.combatCards.length > 0) {
+          state.pendingAction = { type: 'cave_discard', playerId: player.id };
+          emit('cave_discard_prompt', { playerId: player.id, hand: player.combatCards });
+        } else {
+          emit('log', `${player.name} enters the Cave but has no combat cards to discard.`);
         }
         break;
       case 'meadow':
-        // Meadow heals at turn start (handled in _startPlayerTurn)
         emit('log', `${player.name} enters a peaceful Meadow.`);
-        break;
-      case 'curse':
-        const discard = Math.min(2, player.combatCards.length);
-        // For hotseat, auto-discard first N cards
-        for (let i = 0; i < discard; i++) {
-          const card = player.combatCards.pop();
-          if (card) state.decks.combatDiscard.push(card);
-        }
-        if (discard > 0) emit('log', `${player.name} discards ${discard} combat card(s) from the Cursed tile.`);
         break;
     }
   }
 
-  // ── Veil-Step ability (Zephyr) ────────────────────────────
+  // ── Veil-Step ability (Cyan) ─────────────────────────────
   function beginVeilStep() {
     const p = currentPlayer();
-    if (p.characterId !== 'zephyr') { emit('error', 'Only Zephyr can use Veil-Step.'); return; }
+    if (p.characterId !== 'cyan') { emit('error', 'Only Cyan can use Veil-Step.'); return; }
     if (p.actionsLeft < 1) { emit('error', 'Not enough actions.'); return; }
     const throughWalls = p.flags.throughWalls || false;
     const reachable = getReachableTiles(p.tileId, 2, state.tiles, throughWalls);
@@ -380,10 +383,10 @@ const GS = (() => {
     emit('phase_changed', { subphase: 'action_select' });
   }
 
-  // ── Seeking Arrow (Soren) ─────────────────────────────────
+  // ── Seeking Arrow (Green) ────────────────────────────────
   function beginSeekingArrow() {
     const p = currentPlayer();
-    if (p.characterId !== 'soren') { emit('error', 'Only Soren can use Seeking Arrow.'); return; }
+    if (p.characterId !== 'green') { emit('error', 'Only Green can use Seeking Arrow.'); return; }
     if (p.actionsLeft < 2) { emit('error', 'Seeking Arrow costs 2 Actions.'); return; }
     const pierce = p.flags.pierce || false;
     const adjTiles = getAdjacentTileIds(p.tileId, state.tiles);
@@ -427,10 +430,10 @@ const GS = (() => {
     emit('combat_start', { ...state.combat, defenderHand: target.combatCards });
   }
 
-  // ── Mind-Link (Lyra) ─────────────────────────────────────
+  // ── Mind-Link (Indigo) ───────────────────────────────────
   function beginMindLink() {
     const p = currentPlayer();
-    if (p.characterId !== 'lyra') { emit('error', 'Only Lyra can use Mind-Link.'); return; }
+    if (p.characterId !== 'indigo') { emit('error', 'Only Indigo can use Mind-Link.'); return; }
     if (p.combatCards.length < 1) { emit('error', 'No combat cards to spend.'); return; }
     const twoTargets = p.flags.twoTargets || false;
     const otherPlayers = state.players.filter(t => t.alive && t.id !== p.id);
@@ -458,10 +461,10 @@ const GS = (() => {
     emit('phase_changed', { subphase: 'action_select' });
   }
 
-  // ── Shadow-Plunder (Kael) ─────────────────────────────────
+  // ── Shadow-Plunder (Gold) ────────────────────────────────
   function beginShadowPlunder() {
     const p = currentPlayer();
-    if (p.characterId !== 'kael') { emit('error', 'Only Kael can use Shadow-Plunder.'); return; }
+    if (p.characterId !== 'gold') { emit('error', 'Only Gold can use Shadow-Plunder.'); return; }
     if (p.combatCards.length < 1) { emit('error', 'No combat cards to spend.'); return; }
     const targets = state.players.filter(t => t.alive && t.id !== p.id && t.tileId === p.tileId && t.items.length > 0);
     if (targets.length === 0) { emit('error', 'No opponents with items on your tile.'); return; }
@@ -509,10 +512,10 @@ const GS = (() => {
     emit('phase_changed', { subphase: 'action_select' });
   }
 
-  // ── Sanguine Ritual (Vesper) ──────────────────────────────
+  // ── Sanguine Ritual (Red) ────────────────────────────────
   function activateSanguineRitual() {
     const p = currentPlayer();
-    if (p.characterId !== 'vesper') { emit('error', 'Only Vesper can use Sanguine Ritual.'); return; }
+    if (p.characterId !== 'red') { emit('error', 'Only Red can use Sanguine Ritual.'); return; }
     if (p.actionsLeft < 2) { emit('error', 'Sanguine Ritual costs 2 Actions.'); return; }
     p.actionsLeft -= 2;
     p.sanguineActive = true;
@@ -520,7 +523,7 @@ const GS = (() => {
     emit('state_changed', state);
   }
 
-  // ── Berserker activation (Mason) ─────────────────────────
+  // ── Berserker activation (Walnut) ───────────────────────
   function activateBerserker(choice) {
     // choice: 'damage' | 'resistance'
     const p = currentPlayer();
@@ -682,7 +685,7 @@ const GS = (() => {
       const item = _drawItem('bronze');
       if (item) _giveItem(atk, item);
       // Mason gains XP
-      if (atk.characterId === 'mason') { atk.xp += 1; emit('log', `${atk.name}'s Battle Hunger: +1 XP`); }
+      if (atk.characterId === 'walnut') { atk.xp += 1; emit('log', `${atk.name}'s Rites of Discipline: +1 XP`); }
       _endCombat(true);
     } else {
       // Monster counters
@@ -712,7 +715,7 @@ const GS = (() => {
       if (atkCard && !defCard) {
         // Defender concedes (no card) — attacker wins by default
         atk.xp += 1;
-        if (atk.characterId === 'mason') { atk.xp += 1; emit('log', `${atk.name}'s Battle Hunger: +1 XP`); }
+        if (atk.characterId === 'walnut') { atk.xp += 1; emit('log', `${atk.name}'s Rites of Discipline: +1 XP`); }
         emit('log', `${def.name} has no combat card — ${atk.name} wins by default! +1 XP`);
       }
       _endCombat(false);
@@ -726,10 +729,18 @@ const GS = (() => {
 
     if (atkCard.type !== defCard.type) {
       // Attacker wins
-      const dmg = Math.max(0, atk.damage + (atk.bonusDamageNext || 0) - (def.resistance || 0) - (def.armorReduction || 0));
+      let baseDmg = atk.damage;
+      // Green (Marksman): Point-Blank gives +1 damage in PvP
+      if (atk.flags && atk.flags.pointBlank) baseDmg += 1;
+      let dmg = Math.max(0, baseDmg + (atk.bonusDamageNext || 0) - (def.resistance || 0) - (def.armorReduction || 0));
+      // Green (Marksman): takes +1 damage from close-range PvP
+      if (def.characterId === 'green') {
+        dmg += 1;
+        emit('log', `${def.name} takes +1 extra damage (Marksman close-range weakness).`);
+      }
       atk.bonusDamageNext = 0;
       atk.xp += 1;
-      if (atk.characterId === 'mason') { atk.xp += 1; emit('log', `${atk.name}'s Battle Hunger: +1 XP`); }
+      if (atk.characterId === 'walnut') { atk.xp += 1; emit('log', `${atk.name}'s Rites of Discipline: +1 XP`); }
       if (c.sanguineActive || atk.sanguineActive) {
         // Heal on win
         atk.hp = Math.min(atk.maxHp, atk.hp + 2);
@@ -955,7 +966,7 @@ const GS = (() => {
     switch (item.effect) {
       case 'heal': {
         let amount = item.value;
-        if (player.characterId === 'vesper') amount = Math.floor(amount * 2 / 3); // 3→2, 6→4
+        if (player.characterId === 'red') amount = Math.floor(amount * 2 / 3); // 3→2, 6→4
         player.hp = Math.min(player.maxHp, player.hp + amount);
         emit('log', `${player.name} heals ${amount} HP.`);
         break;
@@ -1114,6 +1125,24 @@ const GS = (() => {
     emit('state_changed', state);
   }
 
+  function resolveCaveDiscard(cardUid) {
+    if (!state.pendingAction || state.pendingAction.type !== 'cave_discard') return;
+    const { playerId } = state.pendingAction;
+    state.pendingAction = null;
+    const player = getPlayer(playerId);
+    if (cardUid && player) {
+      const card = player.combatCards.find(c => c.uid === cardUid);
+      if (card) {
+        player.combatCards = player.combatCards.filter(c => c.uid !== cardUid);
+        state.decks.combatDiscard.push(card);
+        emit('log', `${player.name} discards ${card.type} upon entering the Cave.`);
+      }
+    }
+    state.subphase = 'action_select';
+    emit('state_changed', state);
+    emit('phase_changed', { subphase: 'action_select' });
+  }
+
   function resolveMindDrain(attackerId, cardUid) {
     const def = state.players.find(p => p.combatCards.some(c => c.uid === cardUid));
     if (!def) return;
@@ -1226,7 +1255,7 @@ const GS = (() => {
     actionDrawCards,
     useItem,
     resolveDisplace, resolveTeleport, resolvePush,
-    resolveMindDrain, resolveWorldShaper, resolveSalvage,
+    resolveMindDrain, resolveWorldShaper, resolveSalvage, resolveCaveDiscard,
     buyItemFromDeck,
   };
 })();
