@@ -8,7 +8,7 @@ const CHARACTERS = [
     id: 'cyan', name: 'Cyan', lore: 'The Scout',
     hp: 30, damage: 3, actionsPerTurn: 4,
     combatCardCapacity: 5, itemCapacity: 5,
-    color: '#9b59b6', hexColor: 0x9b59b6,
+    color: '#00bcd4', hexColor: 0x00bcd4,
     abilityName: 'Veil-Step',
     abilityDesc: 'Spend 1 Action to move exactly 2 tiles through connected paths (walls still apply unless upgraded).',
     abilityType: 'active', abilityCost: { actions: 1 },
@@ -23,7 +23,7 @@ const CHARACTERS = [
     id: 'indigo', name: 'Indigo', lore: 'The Tactician',
     hp: 27, damage: 3, actionsPerTurn: 4,
     combatCardCapacity: 5, itemCapacity: 5,
-    color: '#3498db', hexColor: 0x3498db,
+    color: '#5c6bc0', hexColor: 0x5c6bc0,
     abilityName: 'Mind-Link',
     abilityDesc: 'Discard 1 Combat Card to peek at an opponent\'s hand. They gain 1 resistance vs. you this round.',
     abilityType: 'active', abilityCost: { combatCards: 1 },
@@ -38,7 +38,7 @@ const CHARACTERS = [
     id: 'gold', name: 'Gold', lore: 'The Rogue',
     hp: 33, damage: 2, actionsPerTurn: 4,
     combatCardCapacity: 5, itemCapacity: 5,
-    color: '#2ecc71', hexColor: 0x2ecc71,
+    color: '#ffd700', hexColor: 0xffd700,
     abilityName: 'Shadow-Plunder',
     abilityDesc: 'Discard 1 Combat Card to steal 1 random item from an opponent on your tile. On success, draw 1 Combat Card. Opponent may block.',
     abilityType: 'active', abilityCost: { combatCards: 1 },
@@ -53,7 +53,7 @@ const CHARACTERS = [
     id: 'walnut', name: 'Walnut', lore: 'The Warrior',
     hp: 30, damage: 3, actionsPerTurn: 4,
     combatCardCapacity: 5, itemCapacity: 4,
-    color: '#e67e22', hexColor: 0xe67e22,
+    color: '#8d6e63', hexColor: 0x8d6e63,
     abilityName: 'Rites of Discipline',
     abilityDesc: 'Passive: Gain +1 XP from winning PvP combat and +1 XP from winning a hunt.',
     abilityType: 'passive', abilityCost: {},
@@ -68,7 +68,7 @@ const CHARACTERS = [
     id: 'red', name: 'Red', lore: 'The Vampire',
     hp: 25, damage: 3, actionsPerTurn: 4,
     combatCardCapacity: 5, itemCapacity: 4,
-    color: '#e74c3c', hexColor: 0xe74c3c,
+    color: '#f44336', hexColor: 0xf44336,
     abilityName: 'Sanguine Ritual',
     abilityDesc: 'Spend 2 Actions at the start of combat. If you win that combat, recover 2 HP.',
     abilityType: 'pre-combat', abilityCost: { actions: 2 },
@@ -83,7 +83,7 @@ const CHARACTERS = [
     id: 'green', name: 'Green', lore: 'The Marksman',
     hp: 30, damage: 2, actionsPerTurn: 4,
     combatCardCapacity: 5, itemCapacity: 4,
-    color: '#1abc9c', hexColor: 0x1abc9c,
+    color: '#4caf50', hexColor: 0x4caf50,
     abilityName: 'Seeking Arrow',
     abilityDesc: 'Spend 2 Actions to fire at a player on an adjacent tile for 4 damage. They may block but cannot counter.',
     abilityType: 'active', abilityCost: { actions: 2 },
@@ -172,7 +172,7 @@ const ITEMS = [
   { id: 'super_potion',    tier: 'gold',   name: 'Super Potion',    icon: '🔮', desc: 'Restore 6 HP. (Red: only 4 HP).',                                                   timing: 'own_turn',  effect: 'heal',         value: 6 },
   { id: 'kidnapping',      tier: 'gold',   name: 'Kidnapping',      icon: '🌪',  desc: 'Move an opponent from their current tile to any other tile on the board.',         timing: 'own_turn',  effect: 'displace' },
   { id: 'terrain_mod',     tier: 'gold',   name: 'Terrain Mod',     icon: '🗺',  desc: 'Remove a tile from the board OR restore a previously removed tile.',              timing: 'own_turn',  effect: 'world_shaper' },
-  { id: 'stun',            tier: 'gold',   name: 'Stun',            icon: '⏱',  desc: "End an opponent's turn immediately.",                                              timing: 'own_turn',  effect: 'time_stop' },
+  { id: 'stun',            tier: 'gold',   name: 'Stun',            icon: '⏱',  desc: "End an opponent's turn immediately (can be used on any player's turn).",         timing: 'reaction',  effect: 'time_stop' },
 ];
 
 // IDs that get extra copies so totals match rulebook (bronze=36, silver=36, gold=12)
@@ -250,18 +250,24 @@ function getAdjacentTileIds(tileId, tiles) {
 }
 
 function isWallBlocking(fromTile, toTile) {
-  if (!fromTile.hasWalls) return false;
   const dr = toTile.row - fromTile.row;
   const dc = toTile.col - fromTile.col;
-  // Wall sides relative to tile (pre-rotation): north, east, south, west
-  // wallConfig is a bitmask: bit0=north, bit1=east, bit2=south, bit3=west
-  const rot = (fromTile.wallRotation || 0);
-  const sides = rotateWalls(fromTile.wallConfig || 0b0000, rot);
-  // Check exit direction from fromTile
-  if (dr === -1 && (sides & 0b0001)) return true; // north
-  if (dc ===  1 && (sides & 0b0010)) return true; // east
-  if (dr ===  1 && (sides & 0b0100)) return true; // south
-  if (dc === -1 && (sides & 0b1000)) return true; // west
+  // Check fromTile's exit side
+  if (fromTile.hasWalls) {
+    const sides = rotateWalls(fromTile.wallConfig || 0b0000, fromTile.wallRotation || 0);
+    if (dr === -1 && (sides & 0b0001)) return true; // north exit
+    if (dc ===  1 && (sides & 0b0010)) return true; // east exit
+    if (dr ===  1 && (sides & 0b0100)) return true; // south exit
+    if (dc === -1 && (sides & 0b1000)) return true; // west exit
+  }
+  // Check toTile's entry side (walls block both directions)
+  if (toTile.hasWalls) {
+    const sides = rotateWalls(toTile.wallConfig || 0b0000, toTile.wallRotation || 0);
+    if (dr === -1 && (sides & 0b0100)) return true; // entering from south of toTile
+    if (dc ===  1 && (sides & 0b1000)) return true; // entering from west of toTile
+    if (dr ===  1 && (sides & 0b0001)) return true; // entering from north of toTile
+    if (dc === -1 && (sides & 0b0010)) return true; // entering from east of toTile
+  }
   return false;
 }
 

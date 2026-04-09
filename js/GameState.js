@@ -51,9 +51,10 @@ const GS = (() => {
     });
 
     // Build decks
-    const bronzeItems = buildItemDeck().filter(i => i.tier === 'bronze');
-    const silverItems = buildItemDeck().filter(i => i.tier === 'silver');
-    const goldItems   = buildItemDeck().filter(i => i.tier === 'gold');
+    const allItems    = buildItemDeck();
+    const bronzeItems = shuffle(allItems.filter(i => i.tier === 'bronze'));
+    const silverItems = shuffle(allItems.filter(i => i.tier === 'silver'));
+    const goldItems   = shuffle(allItems.filter(i => i.tier === 'gold'));
     const combatDeck  = buildCombatDeck();
 
     // Terrain chips bag: tile IDs shuffled
@@ -98,8 +99,20 @@ const GS = (() => {
       p.combatCards = deck.splice(0, Math.min(p.combatCardCap, 5));
     });
 
-    // Draw initial terrain chip
-    const firstChip = terrainBag.pop();
+    // Draw initial terrain chip (mountains must be drawn twice before removal)
+    let firstChip = terrainBag.pop();
+    const initFortressDrawn = {};
+    if (firstChip !== undefined) {
+      const firstTile = tiles.find(t => t.id === firstChip);
+      if (firstTile && firstTile.type === 'mountains') {
+        initFortressDrawn[firstChip] = true;
+        if (terrainBag.length > 0) {
+          const ins = Math.floor(Math.random() * terrainBag.length);
+          terrainBag.splice(ins, 0, firstChip);
+          firstChip = terrainBag.pop();
+        }
+      }
+    }
 
     state = {
       phase:        'game',
@@ -109,8 +122,8 @@ const GS = (() => {
       players,
       tiles,
       terrainBag,
-      scheduledRemoval: [firstChip], // drawn chips → remove at END of current round / START of next
-      fortressDrawn: {},             // tileId → true if drawn once already
+      scheduledRemoval: firstChip !== undefined ? [firstChip] : [],
+      fortressDrawn: initFortressDrawn,
       decks: {
         bronze:        bronzeItems,
         silver:        silverItems,
@@ -203,9 +216,22 @@ const GS = (() => {
       const tile = getTile(chipId);
       if (tile && tile.type === 'mountains' && !state.fortressDrawn[chipId]) {
         state.fortressDrawn[chipId] = true;
-        // Put back and draw another
-        state.terrainBag.unshift(chipId);
-        chipId = state.terrainBag.length > 1 ? state.terrainBag.pop() : chipId;
+        // Put back at random position, draw a different chip
+        if (state.terrainBag.length > 0) {
+          const ins = Math.floor(Math.random() * state.terrainBag.length);
+          state.terrainBag.splice(ins, 0, chipId);
+          chipId = state.terrainBag.pop();
+        }
+        // If still a mountain, skip it this round
+        const newTile = getTile(chipId);
+        if (newTile && newTile.type === 'mountains' && !state.fortressDrawn[chipId]) {
+          state.fortressDrawn[chipId] = true;
+          if (state.terrainBag.length > 0) {
+            const ins2 = Math.floor(Math.random() * state.terrainBag.length);
+            state.terrainBag.splice(ins2, 0, chipId);
+            chipId = state.terrainBag.pop();
+          }
+        }
       }
       const alreadyRemoved = getTile(chipId) && getTile(chipId).removed;
       if (!alreadyRemoved) state.scheduledRemoval.push(chipId);
@@ -294,7 +320,9 @@ const GS = (() => {
     const adj = getAdjacentTileIds(p.tileId, state.tiles);
     if (!adj.includes(tileId)) { emit('error', 'Cannot move there.'); return; }
 
-    p.actionsLeft -= 1;
+    const isFreeMove = state.pendingAction && state.pendingAction.type === 'free_move';
+    if (!isFreeMove) p.actionsLeft -= 1;
+    if (isFreeMove) { state.pendingAction = null; p.flags.freeMoveActive = false; }
     const prevTile = p.tileId;
     p.tileId = tileId;
     emit('log', `${p.name} moves to tile ${tileId} (${getTile(tileId).type}).`);
@@ -487,6 +515,7 @@ const GS = (() => {
   }
 
   function resolveShadowPlunder(blocked) {
+    if (!state.pendingAction || state.pendingAction.type !== 'shadow_plunder_block') return;
     const { attackerId, defenderId } = state.pendingAction;
     const attacker = getPlayer(attackerId);
     const defender = getPlayer(defenderId);
@@ -508,6 +537,7 @@ const GS = (() => {
       _drawCombatCardsForPlayer(attacker, 1);
     }
     state.subphase = 'action_select';
+    emit('combat_end', { attackerWon: false }); // hide combat overlay
     emit('state_changed', state);
     emit('phase_changed', { subphase: 'action_select' });
   }
@@ -682,7 +712,7 @@ const GS = (() => {
     if (atkCard.type !== c.monsterRoll) {
       // Player wins
       emit('log', `${atk.name} wins the hunt! Gains 1 item.`);
-      const item = _drawItem('bronze');
+      const item = _drawItem('bronze') || _drawItem('silver') || _drawItem('gold');
       if (item) _giveItem(atk, item);
       // Mason gains XP
       if (atk.characterId === 'walnut') { atk.xp += 1; emit('log', `${atk.name}'s Rites of Discipline: +1 XP`); }
@@ -713,10 +743,19 @@ const GS = (() => {
 
     if (!atkCard || !defCard) {
       if (atkCard && !defCard) {
-        // Defender concedes (no card) — attacker wins by default
+        // Attacker's card is consumed (played even vs concede)
+        atk.combatCards = atk.combatCards.filter(x => x.uid !== c.attackerCard);
+        state.decks.combatDiscard.push(atkCard);
+        // Defender concedes — takes full damage
+        const concedeDmg = Math.max(1, atk.damage + (atk.bonusDamageNext || 0) - (def.resistance || 0) - (def.armorReduction || 0));
+        atk.bonusDamageNext = 0;
+        _dealDamage(def, atk, concedeDmg);
+        _checkAlive(def);
         atk.xp += 1;
         if (atk.characterId === 'walnut') { atk.xp += 1; emit('log', `${atk.name}'s Rites of Discipline: +1 XP`); }
-        emit('log', `${def.name} has no combat card — ${atk.name} wins by default! +1 XP`);
+        emit('log', `${def.name} concedes — ${atk.name} wins! ${def.name} takes ${concedeDmg} damage. +1 XP`);
+        _endCombat(true, true);
+        return;
       }
       _endCombat(false);
       return;
@@ -872,7 +911,8 @@ const GS = (() => {
       emit('tower_prompt', { tileId: tile.id, towerUsed: p.towerUsed });
     } else if (tile.hasWalls) {
       state.subphase = 'interact';
-      emit('phase_changed', { subphase: 'interact', type: 'rotate', tileId: tile.id });
+      state.pendingAction = { type: 'rotate', tileId: tile.id };
+      emit('rotate_prompt', { playerId: p.id });
     } else {
       emit('error', 'Nothing to interact with here.');
     }
@@ -1019,10 +1059,12 @@ const GS = (() => {
         }
         break;
       case 'free_move':
-        player.actionsLeft += 0; // move handled separately – flag pending free move
         player.flags.freeMoveActive = true;
+        state.subphase = 'move';
+        state.pendingAction = { type: 'free_move', playerId: player.id };
+        emit('state_changed', state);
         emit('phase_changed', { subphase: 'move', validTiles: getAdjacentTileIds(player.tileId, state.tiles), free: true });
-        return; // don't reset subphase yet
+        return; // early return — don't fall through to bottom emit
       case 'teleport':
         emit('teleport_prompt', { playerId: player.id, validTiles: state.tiles.filter(t => !t.removed).map(t => t.id) });
         break;
@@ -1130,7 +1172,8 @@ const GS = (() => {
     const { playerId } = state.pendingAction;
     state.pendingAction = null;
     const player = getPlayer(playerId);
-    if (cardUid && player) {
+    cardUid = (cardUid !== null && cardUid !== undefined) ? parseInt(cardUid) : null;
+    if (player && cardUid !== null && !isNaN(cardUid)) {
       const card = player.combatCards.find(c => c.uid === cardUid);
       if (card) {
         player.combatCards = player.combatCards.filter(c => c.uid !== cardUid);
@@ -1144,6 +1187,7 @@ const GS = (() => {
   }
 
   function resolveMindDrain(attackerId, cardUid) {
+    cardUid = parseInt(cardUid);
     const def = state.players.find(p => p.combatCards.some(c => c.uid === cardUid));
     if (!def) return;
     const card = def.combatCards.find(c => c.uid === cardUid);

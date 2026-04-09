@@ -102,7 +102,8 @@ html, body {
   flex-direction: column;
   gap: 4px;
   overflow-y: auto;
-  max-height: 200px;
+  max-height: 320px;
+  flex-shrink: 0;
 }
 
 .player-info-card {
@@ -125,6 +126,21 @@ html, body {
 .hp-bar      { height: 4px; border-radius: 2px; transition: width 0.3s; }
 
 .pi-mini { font-size: 10px; color: var(--text-dim); margin-top: 2px; }
+
+.pi-reactions { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 3px; }
+.item-btn-mini {
+  border: none;
+  border-radius: 3px;
+  padding: 2px 5px;
+  font-size: 12px;
+  cursor: pointer;
+  font-family: inherit;
+  line-height: 1;
+}
+.item-btn-mini:hover { transform: scale(1.1); }
+.item-btn-mini.tier-bronze { background: #5c3a1a; color: #ffcc88; border: 1px solid #8b5a2a; }
+.item-btn-mini.tier-silver { background: #2a3a5c; color: #aaccff; border: 1px solid #4a6aac; }
+.item-btn-mini.tier-gold   { background: #4a3a00; color: #f5c518; border: 1px solid #8b7000; }
 
 /* ── Hand display ────────────────────────────────────────── */
 #hand-display {

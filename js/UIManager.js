@@ -247,16 +247,30 @@ const UI = (() => {
       const div   = document.createElement('div');
       div.className = `player-info-card${p.alive ? '' : ' dead'}${isCur ? ' current' : ''}`;
       div.style.borderColor = char ? char.color : '#555';
+      // Show character name prominently; show player name as subtitle if different
+      const charName = char ? char.name : '';
+      const showSub  = p.name !== charName && !p.name.match(/^Player \d+$/i);
+      // Reaction items for this player
+      const reactItems = p.items.filter(i => i.timing === 'reaction');
+      const reactHtml  = reactItems.length > 0
+        ? '<div class="pi-reactions">' +
+            reactItems.map(i =>
+              `<button class="item-btn-mini tier-${i.tier}" title="${i.desc}"
+                onclick="UI._useReactionItem(${p.id}, ${i.uid})">${i.icon}</button>`
+            ).join('') +
+          '</div>'
+        : '';
       div.innerHTML = `
-        <div class="pi-name" style="color:${char ? char.color : '#fff'}">${isCur ? '▶ ' : ''}${p.name}${p.alive ? '' : ' ☠'}</div>
-        <div class="pi-char-name" style="font-size:0.7em;opacity:0.75">${char ? char.name : ''}</div>
+        <div class="pi-name" style="color:${char ? char.color : '#fff'}">${isCur ? '▶ ' : ''}${charName || p.name}${p.alive ? '' : ' ☠'}</div>
+        ${showSub ? `<div class="pi-char-name" style="font-size:0.7em;opacity:0.75">${p.name}</div>` : ''}
         <div class="pi-stats">
           <span class="pi-hp">❤ ${p.hp}/${p.maxHp}</span>
           <span class="pi-xp">✨ ${p.xp} XP</span>
           <span class="pi-ap">⚡ ${p.actionsLeft}</span>
         </div>
         <div class="hp-bar-wrap"><div class="hp-bar" style="width:${Math.max(0,(p.hp/p.maxHp)*100)}%;background:${p.hp/p.maxHp > 0.5 ? '#2ecc71' : p.hp/p.maxHp > 0.25 ? '#e67e22' : '#e74c3c'}"></div></div>
-        <div class="pi-mini">🃏${p.combatCards.length}/${p.combatCardCap} &nbsp;🎒${p.items.length}/${p.itemCap}</div>`;
+        <div class="pi-mini">🃏${p.combatCards.length}/${p.combatCardCap} &nbsp;🎒${p.items.length}/${p.itemCap}</div>
+        ${reactHtml}`;
       el.appendChild(div);
     });
   }
@@ -308,7 +322,7 @@ const UI = (() => {
       { id: 'btn-move',    label: '🚶 Move',           onclick: () => GS.beginMove(),       enabled: p.actionsLeft >= 1 },
       { id: 'btn-hunt',    label: '🗡 Hunt',            onclick: () => GS.beginHunt(),       enabled: p.actionsLeft >= 1 && (GS.getTile(p.tileId)||{}).hasMonster },
       { id: 'btn-attack',  label: '⚔ Attack',          onclick: () => GS.beginAttack(),     enabled: p.actionsLeft >= 1 && _playersOnSameTile(p) },
-      { id: 'btn-ability', label: '✨ Ability',          onclick: () => _useAbility(p),      enabled: _canUseAbility(p) },
+      { id: 'btn-ability', label: `✨ ${CHARACTERS.find(c=>c.id===p.characterId)?.abilityName||'Ability'}`, onclick: () => _useAbility(p), enabled: _canUseAbility(p), tooltip: CHARACTERS.find(c=>c.id===p.characterId)?.abilityDesc||'' },
       { id: 'btn-upgrade', label: '⬆ Upgrades',        onclick: () => _showUpgrades(p),    enabled: true },
       { id: 'btn-draw',    label: '🃏 Draw Cards',       onclick: () => _promptDrawCards(p), enabled: p.actionsLeft >= 1 && p.xp > 0 && p.combatCards.length < p.combatCardCap },
       { id: 'btn-interact',label: '🔧 Interact Tile',   onclick: () => GS.beginInteract(),  enabled: p.actionsLeft >= 1 && _canInteract(p) },
@@ -325,6 +339,7 @@ const UI = (() => {
       btn.className = `action-btn${a.enabled ? '' : ' disabled'}`;
       btn.innerHTML = a.label;
       if (a.enabled) btn.onclick = a.onclick;
+      if (a.tooltip) btn.title = a.tooltip;
       bar.appendChild(btn);
     });
   }
@@ -337,7 +352,11 @@ const UI = (() => {
   function _canUseAbility(p) {
     const char = CHARACTERS.find(c => c.id === p.characterId);
     if (!char) return false;
-    if (char.abilityType === 'passive') return false;
+    if (char.abilityType === 'passive') {
+      // Walnut with Ascendant Mastery active can spend XP
+      if (p.characterId === 'walnut' && p.flags && p.flags.berserker && p.xp >= 2) return true;
+      return false;
+    }
     if (p.characterId === 'cyan')   return p.actionsLeft >= 1;
     if (p.characterId === 'indigo') return p.combatCards.length >= 1;
     if (p.characterId === 'gold')   return p.combatCards.length >= 1 && _playersOnSameTile(p);
@@ -365,11 +384,18 @@ const UI = (() => {
   }
 
   function _useAbility(p) {
-    if (p.characterId === 'cyan')   GS.beginVeilStep();
+    if (p.characterId === 'cyan')        GS.beginVeilStep();
     else if (p.characterId === 'indigo') GS.beginMindLink();
     else if (p.characterId === 'gold')   GS.beginShadowPlunder();
     else if (p.characterId === 'red')    GS.activateSanguineRitual();
     else if (p.characterId === 'green')  GS.beginSeekingArrow();
+    else if (p.characterId === 'walnut') {
+      _showModal('⚔ Ascendant Mastery', `<p>Spend 2 XP for a combat boost? (${p.xp} XP available, stackable)</p>`, [
+        { label: '+1 Damage (2 XP)',     cls: 'btn-primary', onclick: () => { GS.activateBerserker('damage');     _closeModal(); }},
+        { label: '+1 Resistance (2 XP)', cls: 'btn-primary', onclick: () => { GS.activateBerserker('resistance'); _closeModal(); }},
+        { label: 'Cancel', cls: 'btn-cancel', onclick: _closeModal },
+      ]);
+    }
   }
 
   function _confirmEndTurn() {
@@ -410,16 +436,18 @@ const UI = (() => {
     const isCurrent = p.id === GS.currentPlayer().id;
     const inCombat  = !!s.combat;
 
-    // Defensive items can be used anytime
-    if (!isCurrent && !item.defensive) {
+    // Reaction items and defensive items can be used anytime
+    if (!isCurrent && !item.defensive && item.timing !== 'reaction') {
       _toast('Can only use this on your own turn.', 'info'); return;
     }
 
     if (item.effect === 'mind_drain' || item.effect === 'destroy_item' || item.effect === 'peek_hand' ||
         item.effect === 'push' || item.effect === 'displace' || item.effect === 'time_stop') {
-      // Needs target
-      const others = s.players.filter(t => t.alive && t.id !== p.id);
-      if (others.length === 0) { _toast('No opponents.', 'info'); return; }
+      // Needs target (push requires same tile)
+      const others = item.effect === 'push'
+        ? s.players.filter(t => t.alive && t.id !== p.id && t.tileId === p.tileId)
+        : s.players.filter(t => t.alive && t.id !== p.id);
+      if (others.length === 0) { _toast('No valid targets.', 'info'); return; }
       _showPlayerPicker(`Use: ${item.icon} ${item.name}`, others, targetId => {
         GS.useItem(p.id, item.uid, targetId);
         _closeModal();
@@ -516,6 +544,26 @@ const UI = (() => {
         hand.appendChild(btn);
       });
       box.appendChild(hand);
+    }
+
+    // Show reactive items (shield, armor, swap) usable during combat
+    const reactiveItems = (player.items || []).filter(i => i.timing === 'reaction');
+    if (reactiveItems.length > 0) {
+      const reactDiv = document.createElement('div');
+      reactDiv.style.cssText = 'margin-top:8px;border-top:1px solid #333;padding-top:6px;';
+      reactDiv.innerHTML = '<div class="hand-label">⚡ Reaction Items (use before picking card):</div>';
+      const reactBtns = document.createElement('div');
+      reactBtns.style.cssText = 'display:flex;gap:4px;flex-wrap:wrap;margin-top:4px;';
+      reactiveItems.forEach(item => {
+        const btn = document.createElement('button');
+        btn.className = `item-btn tier-${item.tier}`;
+        btn.innerHTML = `${item.icon} ${item.name}`;
+        btn.title = item.desc;
+        btn.onclick = () => { GS.useItem(player.id, item.uid, null); };
+        reactBtns.appendChild(btn);
+      });
+      reactDiv.appendChild(reactBtns);
+      box.appendChild(reactDiv);
     }
 
     el.appendChild(box);
@@ -787,7 +835,7 @@ const UI = (() => {
     let html = `<p><b>${p.name}</b> enters the Cave! Discard 1 Combat Card of your choice:</p><div class="hand-reveal">`;
     hand.forEach(card => {
       html += `<button class="combat-card-mini selectable" style="background:${COMBAT_CARD_COLORS[card.type]};cursor:pointer;padding:6px 10px;"
-        onclick="GS.resolveCaveDiscard('${card.uid}'); UI._closeModal();">
+        onclick="GS.resolveCaveDiscard(${card.uid}); UI._closeModal();">
         ${COMBAT_CARD_ICONS[card.type]} ${card.type}</button>`;
     });
     html += '</div>';
@@ -801,7 +849,7 @@ const UI = (() => {
       <p>Choose one of ${def.name}'s combat cards to discard:</p><div class="hand-reveal">`;
     def.combatCards.forEach(card => {
       html += `<button class="combat-card-mini selectable" style="background:${COMBAT_CARD_COLORS[card.type]};cursor:pointer;padding:6px 10px;"
-        onclick="GS.resolveMindDrain(${attackerId}, '${card.uid}'); UI._closeModal();">
+        onclick="GS.resolveMindDrain(${attackerId}, ${card.uid}); UI._closeModal();">
         ${COMBAT_CARD_ICONS[card.type]} ${card.type}</button>`;
     });
     html += '</div>';
@@ -1081,6 +1129,9 @@ const UI = (() => {
   function _onPhaseChanged({ subphase }) {
     if (subphase === 'action_select') {
       _updateActionButtons();
+      // Hide combat overlay if no active combat (e.g. after Shadow Plunder resolves)
+      const s = GS.getState();
+      if (s && !s.combat) hide('combat-overlay');
     }
     if (subphase === 'target_select') {
       // Handled in GameScene highlights
@@ -1143,6 +1194,16 @@ const UI = (() => {
     }
   });
 
+  function _useReactionItem(playerId, itemUid) {
+    itemUid = parseInt(itemUid);
+    const p = GS.getPlayer(playerId);
+    if (!p) return;
+    const item = p.items.find(i => i.uid === itemUid);
+    if (!item) { _toast('Item not found.', 'error'); return; }
+    if (item.timing !== 'reaction') { _toast('Can only use this as a reaction.', 'info'); return; }
+    GS.useItem(playerId, itemUid, null);
+  }
+
   // ── Expose some internals for inline onclick ───────────────
   return {
     init,
@@ -1152,5 +1213,6 @@ const UI = (() => {
     _closeModal,
     _closeUpgradePanel,
     _pickPlayer,
+    _useReactionItem,
   };
 })();

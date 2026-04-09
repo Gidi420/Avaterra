@@ -119,7 +119,9 @@ class GameScene extends Phaser.Scene {
     const container = this.add.container(0, 0).setDepth(10);
     const circle = this.add.arc(0, 0, 16, 0, 360, false, color)
       .setStrokeStyle(2, 0xffffff);
-    const initial = this.add.text(0, 0, player.name[0].toUpperCase(), {
+    const charData = CHARACTERS.find(c => c.id === player.characterId);
+    const tokenLabel = charData ? charData.name[0].toUpperCase() : player.name[0].toUpperCase();
+    const initial = this.add.text(0, 0, tokenLabel, {
       fontSize: '13px', color: '#ffffff', fontFamily: 'monospace', fontStyle: 'bold',
     }).setOrigin(0.5);
 
