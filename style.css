@@ -51,7 +51,8 @@ html, body {
   flex-direction: column;
   padding: 8px;
   gap: 6px;
-  overflow: hidden;
+  overflow-y: auto;
+  overflow-x: hidden;
   min-width: 280px;
   max-width: 380px;
 }
@@ -540,11 +541,17 @@ html, body {
   display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0;
 }
 .tile-pick-btn {
-  padding: 6px 10px; border-radius: 4px;
-  background: #1a1a3a; border: 1px solid var(--panel-border);
-  color: var(--text); font-family: inherit; font-size: 12px; cursor: pointer;
+  background: #1a1a3a;
+  border: 1px solid var(--panel-border);
+  border-radius: 4px;
+  color: var(--text);
+  padding: 5px 8px;
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+  margin: 2px;
 }
-.tile-pick-btn:hover { background: #2a2a5a; }
+.tile-pick-btn:hover { background: #2a2a5a; border-color: var(--accent); }
 
 /* ── Hand reveal ─────────────────────────────────────────── */
 .hand-reveal { display: flex; gap: 6px; flex-wrap: wrap; margin: 8px 0; }

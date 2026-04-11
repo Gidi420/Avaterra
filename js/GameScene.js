@@ -309,7 +309,10 @@ class GameScene extends Phaser.Scene {
       this._ensureBoardBuilt();
       this._repositionTokens();
       const s = GS.getState();
-      if (s) this._updateRemovalMarkers(s.scheduledRemoval || []);
+      if (s) {
+        this._updateRemovalMarkers(s.scheduledRemoval || []);
+        this._updateCityMarkers(s);
+      }
     });
 
     GS.on('player_eliminated', ({ playerId }) => {
@@ -338,6 +341,10 @@ class GameScene extends Phaser.Scene {
 
     GS.on('round_changed', ({ scheduledRemoval }) => {
       this._updateRemovalMarkers(scheduledRemoval || []);
+    });
+
+    GS.on('tile_wall_rotated', ({ tileId }) => {
+      this.refreshTile(tileId);
     });
   }
 
@@ -370,6 +377,25 @@ class GameScene extends Phaser.Scene {
         repeat: -1,
       });
       this.removalMarkers[tileId] = { destroy: () => { gfx.destroy(); txt.destroy(); } };
+    });
+  }
+
+  _updateCityMarkers(state) {
+    if (this.cityMarkers) this.cityMarkers.forEach(m => m.destroy());
+    this.cityMarkers = [];
+    if (!state.freeItemRound) return;
+    state.tiles.filter(t => t.type === 'city' && !t.removed).forEach(tile => {
+      const { x, y } = this._tileXY(tile);
+      const gfx = this.add.graphics().setDepth(7);
+      gfx.lineStyle(3, 0xffd700, 1);
+      gfx.strokeCircle(x, y, 42);
+      const txt = this.add.text(x, y - 34, '🎁', { fontSize: '16px' }).setOrigin(0.5).setDepth(7);
+      this.tweens.add({
+        targets: [gfx, txt],
+        alpha: { from: 1, to: 0.3 },
+        duration: 900, yoyo: true, repeat: -1,
+      });
+      this.cityMarkers.push({ destroy: () => { gfx.destroy(); txt.destroy(); } });
     });
   }
 }

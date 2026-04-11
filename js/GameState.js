@@ -431,31 +431,23 @@ const GS = (() => {
     const p = currentPlayer();
     const target = getPlayer(targetId);
     if (!target || !target.alive) return;
+    if (p.combatCards.length === 0) { emit('error', 'No combat cards to play.'); return; }
     p.actionsLeft -= 2;
-
-    // Special combat: attacker fires arrow for 4 damage. Defender can only block, not counter.
-    emit('log', `${p.name} fires a Seeking Arrow at ${target.name} for 4 damage!`);
+    emit('log', `${p.name} fires a Seeking Arrow at ${target.name}!`);
     state.combat = {
-      type:       'seeking_arrow',
-      attackerId: p.id,
-      defenderId: targetId,
-      round:      1,
-      arrowDamage: 4 + (p.bonusDamageNext || 0),
+      type:         'seeking_arrow',
+      attackerId:   p.id,
+      defenderId:   targetId,
+      round:        1,
+      arrowDamage:  4 + (p.bonusDamageNext || 0),
       attackerCard: null,
       defenderCard: null,
-      attackerPhase: true,
-      defenderPhase: false,
+      phase:        'attacker_select', // standard card-select flow
     };
     p.bonusDamageNext = 0;
     state.subphase = 'combat';
     emit('state_changed', state);
-    // If defender has no cards, resolve immediately
-    if (target.combatCards.length === 0) {
-      _resolveSeekingArrow();
-      return;
-    }
-    // Attacker picks which of defender's cards to destroy / block with
-    emit('combat_start', { ...state.combat, defenderHand: target.combatCards });
+    emit('combat_start', state.combat);
   }
 
   // ── Mind-Link (Indigo) ───────────────────────────────────
@@ -603,15 +595,42 @@ const GS = (() => {
     const tgt = getPlayer(targetId);
     if (!tgt || !tgt.alive || tgt.tileId !== p.tileId) { emit('error', 'Invalid target.'); return; }
 
+    // Red's Sanguine Ritual prompt before combat (needs 1 AP for attack + 2 for ritual = 3 total)
+    if (p.characterId === 'red' && (p.actionsLeft - 1) >= 2) {
+      state.pendingAction = { type: 'sanguine_choice', attackerId: p.id, defenderId: targetId };
+      emit('sanguine_prompt', { attackerId: p.id, defenderId: targetId, actionsLeft: p.actionsLeft - 1 });
+      return;
+    }
+
     // Emergency draw for defender with 0 cards
     if (tgt.combatCards.length === 0 && tgt.xp >= 1) {
-      // Will be handled in UI (prompt defender before combat starts)
       emit('emergency_draw_prompt', { defenderId: targetId });
       state.pendingAction = { type: 'pvp_start', attackerId: p.id, defenderId: targetId };
       return;
     }
 
     _startPvP(p.id, targetId);
+  }
+
+  function resolveSanguineChoice(accept) {
+    if (!state.pendingAction || state.pendingAction.type !== 'sanguine_choice') return;
+    const { attackerId, defenderId } = state.pendingAction;
+    state.pendingAction = null;
+    const atk = getPlayer(attackerId);
+    if (accept && (atk.actionsLeft - 1) >= 2) {
+      atk.sanguineActive = true;
+      atk.actionsLeft -= 2; // ritual cost (attack itself costs 1 more in _startPvP)
+      emit('log', `${atk.name} activates Sanguine Ritual! (+2 HP if combat won)`);
+      emit('state_changed', state);
+    }
+    // Check emergency draw
+    const def = getPlayer(defenderId);
+    if (def.combatCards.length === 0 && def.xp >= 1) {
+      state.pendingAction = { type: 'pvp_start', attackerId, defenderId };
+      emit('emergency_draw_prompt', { defenderId });
+      return;
+    }
+    _startPvP(attackerId, defenderId);
   }
 
   function resolveEmergencyDraw(accept) {
@@ -661,15 +680,16 @@ const GS = (() => {
     }
 
     if (c.type === 'seeking_arrow') {
-      // Attacker picks which card from defender's hand to destroy (blocking arrow), or null for full damage
-      if (playerId !== c.attackerId) return;
-      if (cardUid !== null) {
-        const def = getPlayer(c.defenderId);
-        const cardExists = def.combatCards.find(x => x.uid === cardUid);
-        if (!cardExists) return; // invalid card uid
+      if (c.phase === 'attacker_select' && playerId === c.attackerId) {
+        c.attackerCard = cardUid;
+        c.phase = 'defender_select';
+        emit('combat_update', c);
+      } else if (c.phase === 'defender_select' && playerId === c.defenderId) {
+        c.defenderCard = cardUid; // null = no cards / concede
+        c.phase = 'reveal';
+        emit('combat_update', c);
+        _resolveSeekingArrow();
       }
-      c.defenderCard = cardUid; // null = no block
-      _resolveSeekingArrow();
       return;
     }
 
@@ -712,7 +732,10 @@ const GS = (() => {
     if (atkCard.type !== c.monsterRoll) {
       // Player wins
       emit('log', `${atk.name} wins the hunt! Gains 1 item.`);
-      const item = _drawItem('bronze') || _drawItem('silver') || _drawItem('gold');
+      // Randomized tier: 60% bronze, 30% silver, 10% gold
+      const huntRoll = Math.random();
+      const huntTier = huntRoll < 0.6 ? 'bronze' : huntRoll < 0.9 ? 'silver' : 'gold';
+      const item = _drawItem(huntTier) || _drawItem('bronze') || _drawItem('silver') || _drawItem('gold');
       if (item) _giveItem(atk, item);
       // Mason gains XP
       if (atk.characterId === 'walnut') { atk.xp += 1; emit('log', `${atk.name}'s Rites of Discipline: +1 XP`); }
@@ -828,20 +851,31 @@ const GS = (() => {
     const c   = state.combat;
     const atk = getPlayer(c.attackerId);
     const def = getPlayer(c.defenderId);
+    const atkCard = atk.combatCards.find(x => x.uid === c.attackerCard);
     const defCard = def.combatCards.find(x => x.uid === c.defenderCard);
 
-    if (!defCard) {
-      // Defender has no card → takes full damage
-      emit('log', `${def.name} cannot block! Takes ${c.arrowDamage} damage.`);
-      _dealDamage(def, atk, c.arrowDamage);
-      _checkAlive(def);
-    } else {
+    // Consume played cards
+    if (atkCard) {
+      atk.combatCards = atk.combatCards.filter(x => x.uid !== c.attackerCard);
+      state.decks.combatDiscard.push(atkCard);
+    }
+    if (defCard) {
       def.combatCards = def.combatCards.filter(x => x.uid !== c.defenderCard);
       state.decks.combatDiscard.push(defCard);
-      // Defender blocks if they play any card (Seeking Arrow can't be countered)
-      emit('log', `${def.name} blocks the Seeking Arrow!`);
     }
-    _endCombat(false);
+
+    // Defender blocks by matching card type; otherwise arrow hits
+    if (atkCard && defCard && atkCard.type === defCard.type) {
+      emit('log', `${def.name} blocks the Seeking Arrow! (matched ${defCard.type})`);
+      // No counter-attack — seeking arrow ends here
+    } else {
+      emit('log', `${def.name} cannot block the Seeking Arrow! Takes ${c.arrowDamage} damage.`);
+      _dealDamage(def, atk, c.arrowDamage);
+      _checkAlive(def);
+      atk.xp += 1;
+      if (atk.characterId === 'walnut') { atk.xp += 1; }
+    }
+    _endCombat(false); // No counter possible after seeking arrow
   }
 
   function _endCombat(attackerWon, defenderDead) {
@@ -909,12 +943,20 @@ const GS = (() => {
     if (p.actionsLeft < 1) { emit('error', 'Not enough actions.'); return; }
     if (tile.type === 'tower') {
       emit('tower_prompt', { tileId: tile.id, towerUsed: p.towerUsed });
-    } else if (tile.hasWalls) {
-      state.subphase = 'interact';
-      state.pendingAction = { type: 'rotate', tileId: tile.id };
-      emit('rotate_prompt', { playerId: p.id });
     } else {
-      emit('error', 'Nothing to interact with here.');
+      // Collect current tile + adjacent tiles that have walls
+      const adjIds = getAdjacentTileIds(p.tileId, state.tiles);
+      const rotatableTileIds = [p.tileId, ...adjIds].filter(id => {
+        const t = getTile(id);
+        return t && t.hasWalls && !t.removed;
+      });
+      if (rotatableTileIds.length === 0) {
+        emit('error', 'No walled tiles nearby to rotate.');
+        return;
+      }
+      state.subphase = 'interact';
+      state.pendingAction = { type: 'rotate_pick', tileIds: rotatableTileIds };
+      emit('rotate_tile_pick_prompt', { playerId: p.id, tileIds: rotatableTileIds });
     }
   }
 
@@ -926,6 +968,7 @@ const GS = (() => {
     p.actionsLeft -= 1;
     tile.wallRotation = ((tile.wallRotation || 0) + (direction === 'cw' ? 1 : 3)) % 4;
     emit('log', `${p.name} rotates tile ${tileId}.`);
+    emit('tile_wall_rotated', { tileId });
     state.subphase = 'action_select';
     emit('state_changed', state);
     emit('phase_changed', { subphase: 'action_select' });
@@ -1021,7 +1064,11 @@ const GS = (() => {
         player.actionsLeft += item.value;
         break;
       case 'shield':
-        // Handled in combat resolution
+        if (state.combat) {
+          emit('log', `${player.name} uses Shield — combat blocked! No damage dealt.`);
+          _endCombat(false);
+          return;
+        }
         player.flags.shieldActive = true;
         break;
       case 'smoke_bomb':
@@ -1059,39 +1106,89 @@ const GS = (() => {
         }
         break;
       case 'free_move':
-        player.flags.freeMoveActive = true;
-        state.subphase = 'move';
-        state.pendingAction = { type: 'free_move', playerId: player.id };
-        emit('state_changed', state);
-        emit('phase_changed', { subphase: 'move', validTiles: getAdjacentTileIds(player.tileId, state.tiles), free: true });
-        return; // early return — don't fall through to bottom emit
+        if (extra && extra.tileId !== undefined) {
+          // Direct application (tile pre-selected in UI before consuming item)
+          const fmAdj = getAdjacentTileIds(player.tileId, state.tiles);
+          if (fmAdj.includes(extra.tileId)) {
+            const fmPrev = player.tileId;
+            player.tileId = extra.tileId;
+            emit('log', `${player.name} uses Freestep to move to tile ${extra.tileId} (free).`);
+            emit('player_moved', { playerId: player.id, fromTile: fmPrev, toTile: extra.tileId });
+            _applyTileEffect(player, getTile(extra.tileId));
+            _checkAlive(player);
+          } else {
+            emit('error', 'Invalid Freestep destination.');
+          }
+        } else {
+          // Fallback: set pending mode for board-click resolution
+          player.flags.freeMoveActive = true;
+          state.subphase = 'move';
+          state.pendingAction = { type: 'free_move', playerId: player.id };
+          emit('state_changed', state);
+          emit('phase_changed', { subphase: 'move', validTiles: getAdjacentTileIds(player.tileId, state.tiles), free: true });
+          return;
+        }
+        break;
       case 'teleport':
-        emit('teleport_prompt', { playerId: player.id, validTiles: state.tiles.filter(t => !t.removed).map(t => t.id) });
+        if (extra && extra.tileId !== undefined) {
+          const tpPrev = player.tileId;
+          player.tileId = extra.tileId;
+          emit('log', `${player.name} teleports to tile ${extra.tileId}.`);
+          emit('player_moved', { playerId: player.id, fromTile: tpPrev, toTile: extra.tileId });
+        } else {
+          emit('teleport_prompt', { playerId: player.id, validTiles: state.tiles.filter(t => !t.removed).map(t => t.id) });
+        }
         break;
       case 'displace':
         if (tgt) emit('displace_prompt', { targetId: tgt.id, validTiles: state.tiles.filter(t => !t.removed).map(t => t.id) });
         break;
       case 'rotate_tile':
-        emit('rotate_prompt', { playerId: player.id });
+        if (extra && extra.tileId !== undefined && extra.direction) {
+          const rtTile = getTile(extra.tileId);
+          if (rtTile && rtTile.hasWalls) {
+            rtTile.wallRotation = ((rtTile.wallRotation || 0) + (extra.direction === 'cw' ? 1 : 3)) % 4;
+            emit('log', `${player.name} uses Rotate Tile on tile ${extra.tileId}.`);
+            emit('tile_wall_rotated', { tileId: extra.tileId });
+          }
+        } else {
+          emit('rotate_prompt', { playerId: player.id });
+        }
         break;
       case 'destroy_item':
         if (tgt && tgt.items.length > 0) {
-          const idx = Math.floor(Math.random() * tgt.items.length);
-          const destroyed = tgt.items.splice(idx, 1)[0];
-          _discardItem(destroyed);
-          emit('log', `${tgt.name}'s ${destroyed.name} is destroyed!`);
+          emit('vandalism_prompt', { attackerId: player.id, defenderId: tgt.id, items: tgt.items });
+        } else if (tgt) {
+          emit('log', `${tgt.name} has no items to destroy.`);
         }
         break;
       case 'peek_hand':
         if (tgt) emit('peek_reveal', { viewerId: player.id, targetId: tgt.id, hand: tgt.combatCards });
         break;
       case 'salvage':
-        if (state.decks.bronzeDiscard.length > 0) {
+        if (extra && extra.salvageUid !== undefined) {
+          const salvIdx = state.decks.bronzeDiscard.findIndex(i => i.uid === parseInt(extra.salvageUid));
+          if (salvIdx !== -1) {
+            const salvItem = state.decks.bronzeDiscard.splice(salvIdx, 1)[0];
+            _giveItem(player, salvItem);
+            emit('log', `${player.name} salvages ${salvItem.name}.`);
+          }
+        } else if (state.decks.bronzeDiscard.length > 0) {
           emit('salvage_prompt', { discard: state.decks.bronzeDiscard });
-        } else { emit('log', 'Bronze discard pile is empty.'); }
+        } else {
+          emit('log', 'Bronze discard pile is empty.');
+        }
         break;
       case 'world_shaper':
-        emit('world_shaper_prompt', { tiles: state.tiles });
+        if (extra && extra.action && extra.tileId !== undefined) {
+          if (extra.action === 'remove') {
+            _removeTile(extra.tileId);
+          } else if (extra.action === 'restore') {
+            const wsTile = getTile(extra.tileId);
+            if (wsTile) { wsTile.removed = false; emit('log', `Tile ${extra.tileId} restored.`); emit('tile_restored', { tileId: extra.tileId }); }
+          }
+        } else {
+          emit('world_shaper_prompt', { tiles: state.tiles });
+        }
         break;
       case 'time_stop':
         if (tgt && tgt.id !== currentPlayer().id) {
@@ -1103,9 +1200,30 @@ const GS = (() => {
         }
         break;
       case 'ranged_attack': {
-        const adjTiles = getAdjacentTileIds(player.tileId, state.tiles);
-        const targets = state.players.filter(t => t.alive && t.id !== player.id && adjTiles.includes(t.tileId));
-        emit('ranged_attack_prompt', { attackerId: player.id, targets: targets.map(t => t.id) });
+        if (tgt) {
+          // Start long-range combat directly
+          state.combat = {
+            type: 'seeking_arrow',
+            attackerId: player.id,
+            defenderId: tgt.id,
+            round: 1,
+            arrowDamage: player.damage + (player.bonusDamageNext || 0),
+            attackerCard: null,
+            defenderCard: null,
+            phase: 'attacker_select',
+            sanguineActive: player.sanguineActive,
+          };
+          player.bonusDamageNext = 0;
+          player.sanguineActive = false;
+          state.subphase = 'combat';
+          emit('log', `${player.name} uses Long-Range Strike on ${tgt.name}!`);
+          emit('combat_start', state.combat);
+          return;
+        } else {
+          const adjTiles = getAdjacentTileIds(player.tileId, state.tiles);
+          const targets = state.players.filter(t => t.alive && t.id !== player.id && adjTiles.includes(t.tileId));
+          emit('ranged_attack_prompt', { attackerId: player.id, targets: targets.map(t => t.id) });
+        }
         break;
       }
       case 'mass_confusion':
@@ -1164,6 +1282,20 @@ const GS = (() => {
     p.tileId = newTileId;
     emit('player_moved', { playerId: p.id, fromTile: prev, toTile: newTileId });
     emit('log', `${p.name} is pushed to tile ${newTileId}.`);
+    emit('state_changed', state);
+  }
+
+  function resolveVandalism(attackerId, defenderId, itemUid) {
+    itemUid = parseInt(itemUid);
+    const defender = getPlayer(defenderId);
+    const attacker = getPlayer(attackerId);
+    if (!defender) return;
+    const idx = defender.items.findIndex(i => i.uid === itemUid);
+    if (idx !== -1) {
+      const destroyed = defender.items.splice(idx, 1)[0];
+      _discardItem(destroyed);
+      emit('log', `${attacker ? attacker.name : 'Attacker'} destroys ${defender.name}'s ${destroyed.name}!`);
+    }
     emit('state_changed', state);
   }
 
@@ -1253,6 +1385,15 @@ const GS = (() => {
     }
   }
 
+  function cancelInteract() {
+    if (state.subphase === 'interact') {
+      state.subphase = 'action_select';
+      state.pendingAction = null;
+      emit('state_changed', state);
+      emit('phase_changed', { subphase: 'action_select' });
+    }
+  }
+
   function _endGame() {
     state.phase = 'gameover';
     const winner = state.players.find(p => p.alive);
@@ -1300,6 +1441,7 @@ const GS = (() => {
     useItem,
     resolveDisplace, resolveTeleport, resolvePush,
     resolveMindDrain, resolveWorldShaper, resolveSalvage, resolveCaveDiscard,
+    resolveVandalism, resolveSanguineChoice, cancelInteract,
     buyItemFromDeck,
   };
 })();

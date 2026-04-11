@@ -42,6 +42,9 @@ const UI = (() => {
     GS.on('mind_drain_prompt',     _onMindDrainPrompt);
     GS.on('rotate_prompt',         _onRotatePrompt);
     GS.on('cave_discard_prompt',   _onCaveDiscardPrompt);
+    GS.on('vandalism_prompt',      _onVandalismPrompt);
+    GS.on('sanguine_prompt',       _onSanguinePrompt);
+    GS.on('rotate_tile_pick_prompt', _onRotateTilePickPrompt);
   }
 
   // ══════════════════════════════════════════════════════════
@@ -322,7 +325,7 @@ const UI = (() => {
       { id: 'btn-move',    label: '🚶 Move',           onclick: () => GS.beginMove(),       enabled: p.actionsLeft >= 1 },
       { id: 'btn-hunt',    label: '🗡 Hunt',            onclick: () => GS.beginHunt(),       enabled: p.actionsLeft >= 1 && (GS.getTile(p.tileId)||{}).hasMonster },
       { id: 'btn-attack',  label: '⚔ Attack',          onclick: () => GS.beginAttack(),     enabled: p.actionsLeft >= 1 && _playersOnSameTile(p) },
-      { id: 'btn-ability', label: `✨ ${CHARACTERS.find(c=>c.id===p.characterId)?.abilityName||'Ability'}`, onclick: () => _useAbility(p), enabled: _canUseAbility(p), tooltip: CHARACTERS.find(c=>c.id===p.characterId)?.abilityDesc||'' },
+      { id: 'btn-ability', label: `✨ ${CHARACTERS.find(c=>c.id===p.characterId)?.abilityName||'Ability'}`, onclick: () => _useAbility(p), enabled: _canUseAbility(p), tooltip: p.characterId === 'red' ? 'Auto-activates: prompts when you attack' : (CHARACTERS.find(c=>c.id===p.characterId)?.abilityDesc||'') },
       { id: 'btn-upgrade', label: '⬆ Upgrades',        onclick: () => _showUpgrades(p),    enabled: true },
       { id: 'btn-draw',    label: '🃏 Draw Cards',       onclick: () => _promptDrawCards(p), enabled: p.actionsLeft >= 1 && p.xp > 0 && p.combatCards.length < p.combatCardCap },
       { id: 'btn-interact',label: '🔧 Interact Tile',   onclick: () => GS.beginInteract(),  enabled: p.actionsLeft >= 1 && _canInteract(p) },
@@ -360,7 +363,7 @@ const UI = (() => {
     if (p.characterId === 'cyan')   return p.actionsLeft >= 1;
     if (p.characterId === 'indigo') return p.combatCards.length >= 1;
     if (p.characterId === 'gold')   return p.combatCards.length >= 1 && _playersOnSameTile(p);
-    if (p.characterId === 'red')    return p.actionsLeft >= 2;
+    if (p.characterId === 'red')    return false; // auto-prompts at combat start
     if (p.characterId === 'green')  return p.actionsLeft >= 2 && _adjacentEnemies(p).length > 0;
     return false;
   }
@@ -449,23 +452,75 @@ const UI = (() => {
         : s.players.filter(t => t.alive && t.id !== p.id);
       if (others.length === 0) { _toast('No valid targets.', 'info'); return; }
       _showPlayerPicker(`Use: ${item.icon} ${item.name}`, others, targetId => {
+        _closeModal(); // close picker BEFORE calling GS (which may open new modal)
         GS.useItem(p.id, item.uid, targetId);
-        _closeModal();
       });
-    } else if (item.effect === 'teleport' || item.effect === 'free_move') {
-      _toast(`Select a tile to move to.`, 'info');
-      GS.useItem(p.id, item.uid, null);
+    } else if (item.effect === 'teleport') {
+      const tpValid = s.tiles.filter(t => !t.removed && t.id !== p.tileId).map(t => t.id);
+      _toast('Select any tile to teleport to.', 'info');
+      const tpScene = window._gameScene;
+      if (tpScene) tpScene.highlightTiles(tpValid, 0x00aaff);
+      _awaitTileClick(tileId => {
+        if (tpScene) tpScene.clearHighlights();
+        GS.useItem(p.id, item.uid, null, { tileId });
+      });
+    } else if (item.effect === 'free_move') {
+      const fmValid = getAdjacentTileIds(p.tileId, s.tiles);
+      if (fmValid.length === 0) { _toast('No adjacent tiles to move to.', 'info'); return; }
+      _toast('Select an adjacent tile (free, no AP cost).', 'info');
+      const fmScene = window._gameScene;
+      if (fmScene) fmScene.highlightTiles(fmValid, 0x00ff88);
+      _awaitTileClick(tileId => {
+        if (fmScene) fmScene.clearHighlights();
+        if (!fmValid.includes(tileId)) { _toast('Not a valid free-move destination.', 'error'); return; }
+        GS.useItem(p.id, item.uid, null, { tileId });
+      });
     } else if (item.effect === 'rotate_tile') {
-      const tile = GS.getTile(p.tileId);
-      if (!tile || !tile.hasWalls) { _toast('No walled tile here.', 'info'); return; }
-      // Consume item first — GS will emit rotate_prompt, handler shows the direction modal
-      GS.useItem(p.id, item.uid, null);
+      const walledTiles = s.tiles.filter(t => !t.removed && t.hasWalls);
+      if (walledTiles.length === 0) { _toast('No walled tiles on the board.', 'info'); return; }
+      let rtHtml = '<p>Choose a walled tile to rotate:</p><div class="tile-grid">';
+      walledTiles.forEach(t => {
+        const td = TILE_TYPE_DATA[t.type] || {};
+        rtHtml += `<button class="tile-pick-btn" onclick="UI._pickRotateTileItem(${p.id}, ${item.uid}, ${t.id})">${td.icon || ''} T${t.id} (${td.label || t.type})</button>`;
+      });
+      rtHtml += '</div>';
+      _showModal('Rotate Tile', rtHtml, [{ label: 'Cancel', cls: 'btn-cancel', onclick: _closeModal }]);
     } else if (item.effect === 'world_shaper') {
-      GS.useItem(p.id, item.uid, null);
+      const wsActive  = s.tiles.filter(t => !t.removed);
+      const wsRemoved = s.tiles.filter(t => t.removed);
+      let wsHtml = '<div class="tile-picker"><div><b>Remove an active tile:</b><div class="tile-grid">';
+      wsActive.forEach(t => {
+        const td = TILE_TYPE_DATA[t.type] || {};
+        wsHtml += `<button class="tile-pick-btn" onclick="UI._useWorldShaperItem(${p.id}, ${item.uid}, 'remove', ${t.id})">${td.icon || ''} T${t.id}</button>`;
+      });
+      wsHtml += '</div></div>';
+      if (wsRemoved.length > 0) {
+        wsHtml += '<div><b>Restore a removed tile:</b><div class="tile-grid">';
+        wsRemoved.forEach(t => {
+          const td = TILE_TYPE_DATA[t.type] || {};
+          wsHtml += `<button class="tile-pick-btn" onclick="UI._useWorldShaperItem(${p.id}, ${item.uid}, 'restore', ${t.id})">${td.icon || ''} T${t.id}</button>`;
+        });
+        wsHtml += '</div></div>';
+      }
+      wsHtml += '</div>';
+      _showModal('Terrain Mod', wsHtml, [{ label: 'Cancel', cls: 'btn-cancel', onclick: _closeModal }]);
     } else if (item.effect === 'salvage') {
-      GS.useItem(p.id, item.uid, null);
+      const salvDiscard = s.decks.bronzeDiscard;
+      if (salvDiscard.length === 0) { _toast('Bronze discard pile is empty.', 'info'); return; }
+      let salvHtml = '<p>Choose a Bronze item to salvage:</p><div class="item-grid">';
+      salvDiscard.forEach(it => {
+        salvHtml += `<button class="item-btn tier-bronze" onclick="UI._useSalvageItem(${p.id}, ${item.uid}, ${it.uid})">${it.icon} ${it.name}</button>`;
+      });
+      salvHtml += '</div>';
+      _showModal('Trash — Salvage', salvHtml, [{ label: 'Cancel', cls: 'btn-cancel', onclick: _closeModal }]);
     } else if (item.effect === 'ranged_attack' || item.effect === 'blink_strike') {
-      GS.useItem(p.id, item.uid, null);
+      const adjTiles = getAdjacentTileIds(p.tileId, s.tiles);
+      const rangedTargets = s.players.filter(t => t.alive && t.id !== p.id && adjTiles.includes(t.tileId));
+      if (rangedTargets.length === 0) { _toast('No targets on adjacent tiles.', 'info'); return; }
+      _showPlayerPicker('Long-Range Strike — Choose target', rangedTargets, targetId => {
+        _closeModal();
+        GS.useItem(p.id, item.uid, targetId);
+      });
     } else if (item.effect === 'void_rift') {
       GS.useItem(p.id, item.uid, null);
     } else {
@@ -687,43 +742,56 @@ const UI = (() => {
   function _showSeekingArrow(combat) {
     const atk = GS.getPlayer(combat.attackerId);
     const def = GS.getPlayer(combat.defenderId);
-    // Attacker picks which of defender's cards to destroy (blocking the arrow)
-    const defHand = combat.defenderHand || def.combatCards;
-    _buildPassDeviceScreen(atk.name, `choose a card from ${def.name}'s hand to destroy`, () => {
+
+    if (combat.phase === 'attacker_select') {
+      _buildPassDeviceScreen(atk.name, `play an attack card for Seeking Arrow`, () => {
+        _buildCardSelector(atk,
+          `🏹 Seeking Arrow — <b>${atk.name}</b> fires at <b>${def.name}</b><br>
+           <small>Pick your card. Defender must match it to block. No counter if blocked.</small>`,
+          uid => GS.selectCombatCard(atk.id, uid));
+      });
+    } else if (combat.phase === 'defender_select') {
+      _buildPassDeviceScreen(def.name, `try to block the Seeking Arrow`, () => {
+        _buildCardSelector(def,
+          `🏹 Seeking Arrow — <b>${def.name}</b> is targeted!<br>
+           <small>Match attacker's card type to block. No counter-attack possible.</small>`,
+          uid => GS.selectCombatCard(def.id, uid));
+      });
+    } else if (combat.phase === 'reveal') {
+      const atkCard = _getCardObj(atk, combat.attackerCard);
+      const defCard = _getCardObj(def, combat.defenderCard);
+      const blocked = atkCard && defCard && atkCard.type === defCard.type;
       const el = $('combat-overlay');
       el.innerHTML = '';
       el.classList.remove('hidden');
       const box = document.createElement('div');
       box.className = 'combat-box';
-      box.innerHTML = `<div class="combat-title">${atk.name}: Seeking Arrow (${combat.arrowDamage} dmg)<br>
-        <small>${def.name}'s hand — pick one card to destroy (blocks the arrow), or press Skip to deal full damage.</small></div>`;
-      const hand = document.createElement('div');
-      hand.className = 'combat-hand';
-      if (defHand.length === 0) {
-        hand.innerHTML = '<div class="no-cards">Defender has no cards — arrow strikes automatically!</div>';
-        box.appendChild(hand);
-        const btn = document.createElement('button');
-        btn.className = 'btn btn-primary big-btn';
-        btn.textContent = 'Resolve';
-        btn.onclick = () => GS.selectCombatCard(atk.id, null);
-        box.appendChild(btn);
-      } else {
-        defHand.forEach(card => {
-          const btn = document.createElement('button');
-          btn.className = `combat-card-big type-${card.type}`;
-          btn.innerHTML = `<span class="card-icon">${COMBAT_CARD_ICONS[card.type]}</span><span class="card-name">${card.type.toUpperCase()}</span>`;
-          btn.onclick = () => GS.selectCombatCard(atk.id, card.uid);
-          hand.appendChild(btn);
-        });
-        box.appendChild(hand);
-        const skip = document.createElement('button');
-        skip.className = 'btn btn-cancel';
-        skip.textContent = '💥 Skip — Deal Full Damage Instead';
-        skip.onclick = () => GS.selectCombatCard(atk.id, null);
-        box.appendChild(skip);
-      }
+      box.innerHTML = `
+        <div class="combat-title">🏹 Seeking Arrow — Result</div>
+        <div class="reveal-row">
+          <div class="reveal-player">
+            <div class="reveal-name">${atk.name} (Attacker)</div>
+            <div class="combat-card-big type-${atkCard ? atkCard.type : 'none'}">
+              <span class="card-icon">${atkCard ? COMBAT_CARD_ICONS[atkCard.type] : '?'}</span>
+              <span class="card-name">${atkCard ? atkCard.type.toUpperCase() : 'NONE'}</span>
+            </div>
+          </div>
+          <div class="vs-text">VS</div>
+          <div class="reveal-player">
+            <div class="reveal-name">${def.name} (Defender)</div>
+            <div class="combat-card-big type-${defCard ? defCard.type : 'none'}">
+              <span class="card-icon">${defCard ? COMBAT_CARD_ICONS[defCard.type] : '?'}</span>
+              <span class="card-name">${defCard ? defCard.type.toUpperCase() : 'NONE'}</span>
+            </div>
+          </div>
+        </div>
+        <div class="reveal-result">
+          ${blocked
+            ? `<span class="tie">${def.name} blocks! (matched ${defCard.type})</span>`
+            : `<span class="win">${atk.name} hits! ${def.name} takes ${combat.arrowDamage} damage.</span>`}
+        </div>`;
       el.appendChild(box);
-    });
+    }
   }
 
   function _buildPassDeviceScreen(playerName, action, onReady) {
@@ -842,15 +910,63 @@ const UI = (() => {
     _showModal('⛰ Cave', html, []);
   }
 
+  function _onVandalismPrompt({ attackerId, defenderId, items }) {
+    const atk = GS.getPlayer(attackerId);
+    const def = GS.getPlayer(defenderId);
+    let html = `<p><b>${atk.name}</b> uses Vandalism on <b>${def.name}</b>!</p>
+      <p>Pick one of ${def.name}'s ${items.length} item(s) to destroy (blind pick):</p>
+      <div class="hand-reveal">`;
+    items.forEach((item, i) => {
+      html += `<button style="background:#3a2a1a;border:2px solid #8b5a2a;border-radius:6px;padding:10px 14px;cursor:pointer;color:#ffcc88;font-size:13px;margin:3px;"
+        onclick="UI._resolveVandalism(${attackerId}, ${defenderId}, ${item.uid})">
+        📦 Item ${i + 1}</button>`;
+    });
+    html += '</div>';
+    _showModal('Vandalism', html, [
+      { label: 'Cancel', cls: 'btn-cancel', onclick: _closeModal },
+    ]);
+  }
+
+  function _resolveVandalism(attackerId, defenderId, itemUid) {
+    _closeModal();
+    GS.resolveVandalism(attackerId, defenderId, itemUid);
+  }
+
+  function _onSanguinePrompt({ attackerId, defenderId, actionsLeft }) {
+    const atk = GS.getPlayer(attackerId);
+    _showModal(`🩸 Sanguine Ritual?`, `
+      <p><b>${atk.name}</b> is about to attack!</p>
+      <p>Activate Sanguine Ritual? (costs 2 AP — you have ${actionsLeft} remaining)</p>
+      <p>If you win this combat, recover <b>2 HP</b>.</p>
+    `, [
+      { label: '🩸 Yes, activate (2 AP)', cls: 'btn-primary', onclick: () => { _closeModal(); GS.resolveSanguineChoice(true);  }},
+      { label: 'No, skip',                cls: 'btn-cancel',  onclick: () => { _closeModal(); GS.resolveSanguineChoice(false); }},
+    ]);
+  }
+
+  function _onRotateTilePickPrompt({ playerId, tileIds }) {
+    let html = '<p>Choose a tile to rotate:</p><div class="tile-grid">';
+    tileIds.forEach(id => {
+      const t  = GS.getTile(id);
+      const td = TILE_TYPE_DATA[t.type] || {};
+      html += `<button class="tile-pick-btn" onclick="UI._pickInteractTile(${id})">${td.icon || ''} T${id} (${td.label || t.type})</button>`;
+    });
+    html += '</div>';
+    _showModal('Rotate Walled Tile', html, [
+      { label: 'Cancel', cls: 'btn-cancel', onclick: () => { GS.cancelInteract(); _closeModal(); } },
+    ]);
+  }
+
   function _onMindDrainPrompt({ attackerId, defenderId }) {
     const atk = GS.getPlayer(attackerId);
     const def = GS.getPlayer(defenderId);
     let html = `<p><b>${atk.name}</b> uses Disarm on <b>${def.name}</b>!</p>
-      <p>Choose one of ${def.name}'s combat cards to discard:</p><div class="hand-reveal">`;
-    def.combatCards.forEach(card => {
-      html += `<button class="combat-card-mini selectable" style="background:${COMBAT_CARD_COLORS[card.type]};cursor:pointer;padding:6px 10px;"
+      <p>Choose one of ${def.name}'s ${def.combatCards.length} card(s) to discard (blind pick):</p>
+      <div class="hand-reveal">`;
+    def.combatCards.forEach((card, i) => {
+      html += `<button style="background:#2a2a4a;border:2px solid #555;border-radius:6px;padding:12px 16px;cursor:pointer;color:#fff;font-size:14px;margin:3px;"
         onclick="GS.resolveMindDrain(${attackerId}, ${card.uid}); UI._closeModal();">
-        ${COMBAT_CARD_ICONS[card.type]} ${card.type}</button>`;
+        🂠<br><small>Card ${i + 1}</small></button>`;
     });
     html += '</div>';
     _showModal('Disarm', html, [
@@ -1204,6 +1320,34 @@ const UI = (() => {
     GS.useItem(playerId, itemUid, null);
   }
 
+  function _pickRotateTileItem(playerId, itemUid, tileId) {
+    _closeModal();
+    _showModal(`Rotate Tile T${tileId}`, '<p>Choose rotation direction:</p>', [
+      { label: '↻ Clockwise',         cls: 'btn-primary', onclick: () => { _closeModal(); GS.useItem(playerId, itemUid, null, { tileId, direction: 'cw'  }); }},
+      { label: '↺ Counter-Clockwise', cls: 'btn-primary', onclick: () => { _closeModal(); GS.useItem(playerId, itemUid, null, { tileId, direction: 'ccw' }); }},
+      { label: 'Cancel', cls: 'btn-cancel', onclick: _closeModal },
+    ]);
+  }
+
+  function _useWorldShaperItem(playerId, itemUid, action, tileId) {
+    _closeModal();
+    GS.useItem(playerId, itemUid, null, { action, tileId });
+  }
+
+  function _useSalvageItem(playerId, itemUid, salvageUid) {
+    _closeModal();
+    GS.useItem(playerId, itemUid, null, { salvageUid });
+  }
+
+  function _pickInteractTile(tileId) {
+    _closeModal();
+    _showModal(`Rotate Tile T${tileId}`, '<p>Choose rotation direction:</p>', [
+      { label: '↻ Clockwise',         cls: 'btn-primary', onclick: () => { GS.commitRotateTile(tileId, 'cw');  _closeModal(); }},
+      { label: '↺ Counter-Clockwise', cls: 'btn-primary', onclick: () => { GS.commitRotateTile(tileId, 'ccw'); _closeModal(); }},
+      { label: 'Cancel', cls: 'btn-cancel', onclick: () => { GS.cancelInteract(); _closeModal(); }},
+    ]);
+  }
+
   // ── Expose some internals for inline onclick ───────────────
   return {
     init,
@@ -1214,5 +1358,10 @@ const UI = (() => {
     _closeUpgradePanel,
     _pickPlayer,
     _useReactionItem,
+    _pickRotateTileItem,
+    _useWorldShaperItem,
+    _useSalvageItem,
+    _pickInteractTile,
+    _resolveVandalism,
   };
 })();
