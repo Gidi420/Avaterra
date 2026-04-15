@@ -255,12 +255,18 @@ const UI = (() => {
       const showSub  = p.name !== charName && !p.name.match(/^Player \d+$/i);
       // Reaction items for this player
       const reactItems = p.items.filter(i => i.timing === 'reaction');
-      const reactHtml  = reactItems.length > 0
+      const isOffTurn  = !isCur && p.alive;
+      const canInterruptDraw = isOffTurn && p.combatCards.length < p.combatCardCap;
+      const reactHtml  = (reactItems.length > 0 || canInterruptDraw)
         ? '<div class="pi-reactions">' +
             reactItems.map(i =>
               `<button class="item-btn-mini tier-${i.tier}" title="${i.desc}"
                 onclick="UI._useReactionItem(${p.id}, ${i.uid})">${i.icon}</button>`
             ).join('') +
+            (canInterruptDraw
+              ? `<button class="item-btn-mini tier-bronze" title="Interrupt: draw 1 card (costs 1 AP next turn)"
+                  onclick="GS.interruptDrawCard(${p.id})">🃏+</button>`
+              : '') +
           '</div>'
         : '';
       div.innerHTML = `
@@ -327,7 +333,7 @@ const UI = (() => {
       { id: 'btn-attack',  label: '⚔ Attack',          onclick: () => GS.beginAttack(),     enabled: p.actionsLeft >= 1 && _playersOnSameTile(p) },
       { id: 'btn-ability', label: `✨ ${CHARACTERS.find(c=>c.id===p.characterId)?.abilityName||'Ability'}`, onclick: () => _useAbility(p), enabled: _canUseAbility(p), tooltip: p.characterId === 'red' ? 'Auto-activates: prompts when you attack' : (CHARACTERS.find(c=>c.id===p.characterId)?.abilityDesc||'') },
       { id: 'btn-upgrade', label: '⬆ Upgrades',        onclick: () => _showUpgrades(p),    enabled: true },
-      { id: 'btn-draw',    label: '🃏 Draw Cards',       onclick: () => _promptDrawCards(p), enabled: p.actionsLeft >= 1 && p.xp > 0 && p.combatCards.length < p.combatCardCap },
+      { id: 'btn-draw',    label: '🃏 Draw Cards',       onclick: () => _promptDrawCards(p), enabled: p.actionsLeft >= 1 && p.combatCards.length < p.combatCardCap },
       { id: 'btn-interact',label: '🔧 Interact Tile',   onclick: () => GS.beginInteract(),  enabled: p.actionsLeft >= 1 && _canInteract(p) },
       { id: 'btn-buy',     label: '💰 Buy Item',         onclick: () => _promptBuyItem(p),   enabled: _canBuyItem(p) },
       { id: 'btn-end',     label: '✅ End Turn',          onclick: () => _confirmEndTurn(),   enabled: true },
@@ -407,22 +413,22 @@ const UI = (() => {
 
   function _promptDrawCards(p) {
     const space = p.combatCardCap - p.combatCards.length;
-    const max   = Math.min(space, p.xp);
-    if (max === 0) { _toast('Nothing to draw.', 'info'); return; }
+    const max   = Math.min(space, p.actionsLeft);
+    if (max === 0) { _toast('Not enough actions or hand is full.', 'info'); return; }
     _showModal('Draw Combat Cards', `
-      <p>Spend 1 Action + <b>N XP</b> to draw N cards (max: ${max}).</p>
-      <input type="range" id="draw-slider" min="1" max="${max}" value="${max}">
-      <div id="draw-val">Draw ${max} cards</div>
+      <p>Spend <b>1 AP per card</b> to draw cards (max: ${max}, you have ${p.actionsLeft} AP).</p>
+      <input type="range" id="draw-slider" min="1" max="${max}" value="1">
+      <div id="draw-val">Draw 1 card (costs 1 AP)</div>
     `, [
       { label: 'Draw', cls: 'btn-primary', onclick: () => {
         const n = parseInt($('draw-slider').value);
-        GS.actionDrawCards(n);
         _closeModal();
+        GS.actionDrawCards(n);
       }},
       { label: 'Cancel', cls: 'btn-cancel', onclick: _closeModal },
     ]);
     const sl = $('draw-slider');
-    if (sl) sl.oninput = () => { $('draw-val').textContent = `Draw ${sl.value} cards`; };
+    if (sl) sl.oninput = () => { $('draw-val').textContent = `Draw ${sl.value} card(s) (costs ${sl.value} AP)`; };
   }
 
   function _promptBuyItem(p) {
@@ -704,11 +710,30 @@ const UI = (() => {
       box.className = 'combat-box';
       box.innerHTML = `
         <div class="combat-title">Roll Monster Die</div>
-        <p>Another player rolls for the monster…</p>`;
+        <p>Another player rolls for the monster…</p>
+        <div id="roulette-display" class="roulette-die">🎲</div>`;
       const rollBtn = document.createElement('button');
       rollBtn.className = 'btn btn-primary big-btn';
+      rollBtn.id = 'roll-monster-btn';
       rollBtn.textContent = '🎲 Roll Monster Die';
-      rollBtn.onclick = () => GS.rollMonsterDie();
+      rollBtn.onclick = () => {
+        rollBtn.disabled = true;
+        const types = Object.keys(COMBAT_CARD_ICONS);
+        const display = document.getElementById('roulette-display');
+        let ticks = 0;
+        const totalTicks = 18 + Math.floor(Math.random() * 10);
+        const interval = setInterval(() => {
+          const t = types[Math.floor(Math.random() * types.length)];
+          display.textContent = COMBAT_CARD_ICONS[t];
+          display.className = `roulette-die type-${t}`;
+          ticks++;
+          if (ticks >= totalTicks) {
+            clearInterval(interval);
+            display.classList.add('roulette-done');
+            setTimeout(() => GS.rollMonsterDie(), 200);
+          }
+        }, 80 + ticks * 4);
+      };
       box.appendChild(rollBtn);
       el.appendChild(box);
     } else if (combat.phase === 'reveal') {
@@ -887,13 +912,20 @@ const UI = (() => {
     });
   }
 
-  function _onTowerPrompt({ tileId, towerUsed }) {
+  function _onTowerPrompt({ tileId, towerUsed, rotatableTileIds }) {
+    const rotateBtn = (rotatableTileIds && rotatableTileIds.length > 0)
+      ? { label: '🔄 Rotate Nearby Tile (1 AP)', cls: 'btn-primary', onclick: () => {
+          _closeModal();
+          _pickRotateTileItem(rotatableTileIds);
+        }}
+      : null;
     _showModal('Magic Tower', `
       <p>You are on a Magic Tower. Choose an action:</p>
       ${towerUsed ? '<p><em>Healing power already used this game.</em></p>' : ''}
     `, [
-      { label: '🌀 Teleport to other Tower (1 AP)', cls: 'btn-primary', onclick: () => { GS.commitTowerAction('teleport'); _closeModal(); }},
-      !towerUsed ? { label: '❤ Heal 3 HP (1 AP, once per game)', cls: 'btn-primary', onclick: () => { GS.commitTowerAction('heal'); _closeModal(); }} : null,
+      { label: '🌀 Teleport to other Tower (1 AP)', cls: 'btn-primary', onclick: () => { _closeModal(); GS.commitTowerAction('teleport'); }},
+      !towerUsed ? { label: '❤ Heal 3 HP (1 AP, once per game)', cls: 'btn-primary', onclick: () => { _closeModal(); GS.commitTowerAction('heal'); }} : null,
+      rotateBtn,
       { label: 'Cancel', cls: 'btn-cancel', onclick: _closeModal },
     ].filter(Boolean));
   }

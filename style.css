@@ -584,3 +584,111 @@ html, body {
 ::-webkit-scrollbar { width: 5px; }
 ::-webkit-scrollbar-track { background: #0a0a18; }
 ::-webkit-scrollbar-thumb { background: #3a3a5a; border-radius: 3px; }
+
+/* ── Monster roulette die ───────────────────────────────── */
+.roulette-die {
+  font-size: 64px;
+  text-align: center;
+  margin: 16px 0;
+  display: block;
+  transition: color 0.05s;
+  min-height: 80px;
+}
+.roulette-done {
+  animation: roulette-pop 0.3s ease-out;
+}
+@keyframes roulette-pop {
+  0%   { transform: scale(1.5); }
+  60%  { transform: scale(0.9); }
+  100% { transform: scale(1); }
+}
+
+/* ── God Mode Debug Panel ───────────────────────────────── */
+#debug-toggle-btn {
+  position: fixed;
+  bottom: 12px;
+  right: 12px;
+  z-index: 9999;
+  background: #1a1a3a;
+  border: 1px solid #5555aa;
+  color: #aaa;
+  font-size: 18px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  opacity: 0.7;
+}
+#debug-toggle-btn:hover { opacity: 1; }
+
+#debug-panel {
+  position: fixed;
+  bottom: 50px;
+  right: 12px;
+  z-index: 9998;
+  background: #0d0d22;
+  border: 1px solid #4444aa;
+  border-radius: 8px;
+  padding: 0;
+  width: 300px;
+  max-height: 80vh;
+  overflow-y: auto;
+  font-size: 13px;
+  color: #ccc;
+  box-shadow: 0 0 20px rgba(100,80,255,0.3);
+}
+#debug-header {
+  background: #1a1a44;
+  padding: 8px 12px;
+  font-weight: bold;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-radius: 8px 8px 0 0;
+  color: #aaddff;
+  font-size: 14px;
+}
+#debug-close {
+  background: none;
+  border: none;
+  color: #aaa;
+  cursor: pointer;
+  font-size: 16px;
+}
+#debug-body { padding: 10px; }
+#debug-body section {
+  border-bottom: 1px solid #2a2a4a;
+  padding: 8px 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  align-items: center;
+}
+#debug-body section:last-child { border-bottom: none; }
+#debug-body h4 {
+  width: 100%;
+  color: #8888ff;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  margin-bottom: 2px;
+}
+#debug-body select, #debug-body input {
+  background: #1a1a3a;
+  border: 1px solid #3a3a6a;
+  color: #ccc;
+  border-radius: 4px;
+  padding: 3px 6px;
+  font-size: 12px;
+  flex: 1;
+  min-width: 80px;
+}
+#debug-body button {
+  background: #2a2a5a;
+  border: 1px solid #5555aa;
+  color: #aaddff;
+  border-radius: 4px;
+  padding: 4px 10px;
+  cursor: pointer;
+  font-size: 12px;
+}
+#debug-body button:hover { background: #3a3a7a; }

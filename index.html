@@ -70,6 +70,49 @@
 <!-- ── Game over overlay ─────────────────────────────────── -->
 <div id="gameover-overlay" class="hidden"></div>
 
+<!-- ── God Mode Debug Panel ──────────────────────────────── -->
+<div id="debug-panel" class="hidden">
+  <div id="debug-header">
+    🛠 God Mode
+    <button id="debug-close" onclick="DebugPanel.toggle()">✕</button>
+  </div>
+  <div id="debug-body">
+    <section>
+      <h4>Spawn Item</h4>
+      <select id="dbg-player-sel"></select>
+      <select id="dbg-tier-sel">
+        <option value="bronze">Bronze</option>
+        <option value="silver">Silver</option>
+        <option value="gold">Gold</option>
+      </select>
+      <button onclick="DebugPanel.spawnItem()">Spawn</button>
+    </section>
+    <section>
+      <h4>Swap Terrain</h4>
+      <select id="dbg-tile-sel"></select>
+      <select id="dbg-terrain-sel"></select>
+      <button onclick="DebugPanel.swapTerrain()">Swap</button>
+    </section>
+    <section>
+      <h4>Trigger Ability</h4>
+      <select id="dbg-ability-player"></select>
+      <button onclick="DebugPanel.triggerAbility()">Trigger</button>
+    </section>
+    <section>
+      <h4>Set HP / XP / AP</h4>
+      <select id="dbg-stat-player"></select>
+      <select id="dbg-stat-type">
+        <option value="hp">HP</option>
+        <option value="xp">XP</option>
+        <option value="ap">AP</option>
+      </select>
+      <input id="dbg-stat-val" type="number" value="5" min="0" max="99" style="width:50px">
+      <button onclick="DebugPanel.setStat()">Set</button>
+    </section>
+  </div>
+</div>
+<button id="debug-toggle-btn" onclick="DebugPanel.toggle()" title="God Mode">🛠</button>
+
 <!-- ── Scripts ───────────────────────────────────────────── -->
 <!-- Phaser 3 -->
 <script src="https://cdn.jsdelivr.net/npm/phaser@3.60.0/dist/phaser.min.js"></script>
@@ -79,6 +122,7 @@
 <script src="js/GameState.js"></script>
 <script src="js/GameScene.js"></script>
 <script src="js/UIManager.js"></script>
+<script src="js/DebugPanel.js"></script>
 <script src="js/main.js"></script>
 
 </body>

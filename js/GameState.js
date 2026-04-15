@@ -86,6 +86,7 @@ const GS = (() => {
         bonusDamageNext: 0,     // from Battle Surge / similar
         armorReduction: 0,      // active armor item
         sanguineActive: false,  // Vesper ritual this combat
+        interruptDebt:  0,      // AP owed at start of next turn (from interrupt draws)
       };
     });
 
@@ -184,12 +185,33 @@ const GS = (() => {
 
   function _startPlayerTurn(player) {
     player.actionsLeft = player.actionsPerTurn;
+    // Repay AP debt from interrupt draws on previous turns
+    if (player.interruptDebt > 0) {
+      const cost = Math.min(player.interruptDebt, player.actionsLeft);
+      player.actionsLeft -= cost;
+      player.interruptDebt = 0;
+      emit('log', `${player.name} repays ${cost} AP debt from interrupt draws.`);
+    }
     _drawCombatCardsForPlayer(player);
-    // Meadow: heal 1 HP at start of turn
+    // Apply terrain penalties at start of turn (wasteland dmg, frozen_tundra AP loss)
     const standingTile = getTile(player.tileId);
-    if (standingTile && standingTile.type === 'meadow' && !standingTile.removed) {
-      player.hp = Math.min(player.maxHp, player.hp + 1);
-      emit('log', `${player.name} rests in the Meadow and heals 1 HP.`);
+    if (standingTile && !standingTile.removed) {
+      if (standingTile.type === 'wasteland') {
+        _dealDamage(player, null, 1);
+        emit('log', `${player.name} takes 1 damage standing in the Wasteland.`);
+        _checkAlive(player);
+        if (!player.alive) return;
+      }
+      if (standingTile.type === 'frozen_tundra') {
+        if (player.actionsLeft > 0) {
+          player.actionsLeft = Math.max(0, player.actionsLeft - 1);
+          emit('log', `${player.name} is slowed by Frozen Tundra — loses 1 Action.`);
+        }
+      }
+      if (standingTile.type === 'meadow') {
+        player.hp = Math.min(player.maxHp, player.hp + 1);
+        emit('log', `${player.name} rests in the Meadow and heals 1 HP.`);
+      }
     }
     state.subphase = 'action_select';
     emit('state_changed', state);
@@ -289,20 +311,30 @@ const GS = (() => {
     }
   }
 
-  function actionDrawCards(xpAmount) {
-    // Spend 1 AP + xpAmount XP to draw xpAmount cards
+  function actionDrawCards(count) {
+    // Spend 1 AP per card drawn (no XP cost)
     const p = currentPlayer();
-    if (p.actionsLeft < 1) { emit('error', 'Not enough actions.'); return; }
-    if (p.xp < xpAmount)    { emit('error', 'Not enough XP.'); return; }
     const space = p.combatCardCap - p.combatCards.length;
     if (space === 0)         { emit('error', 'Combat card hand is already full.'); return; }
-    const draw = Math.min(xpAmount, space);
-    p.actionsLeft -= 1;
-    p.xp -= draw;
-    _drawCombatCardsForPlayer(p, draw);
-    emit('log', `${p.name} spends 1 Action + ${draw} XP to draw ${draw} combat card(s).`);
+    const n = Math.min(count || 1, space);
+    if (p.actionsLeft < n)   { emit('error', `Not enough actions (need ${n}).`); return; }
+    p.actionsLeft -= n;
+    _drawCombatCardsForPlayer(p, n);
+    emit('log', `${p.name} spends ${n} Action(s) to draw ${n} combat card(s).`);
     emit('state_changed', state);
     emit('phase_changed', { subphase: 'action_select' });
+  }
+
+  function interruptDrawCard(playerId) {
+    // Any player can draw 1 card on another player's turn — costs 1 AP from their NEXT turn
+    const p = getPlayer(playerId);
+    if (!p || !p.alive) return;
+    const space = p.combatCardCap - p.combatCards.length;
+    if (space === 0) { emit('error', `${p.name}'s hand is already full.`); return; }
+    p.interruptDebt = (p.interruptDebt || 0) + 1;
+    _drawCombatCardsForPlayer(p, 1);
+    emit('log', `${p.name} interrupt-draws 1 card (1 AP deducted next turn).`);
+    emit('state_changed', state);
   }
 
   // ── Move action ───────────────────────────────────────────
@@ -339,14 +371,8 @@ const GS = (() => {
   function _applyTileEffect(player, tile) {
     if (!tile || tile.removed) return;
     switch (tile.type) {
-      case 'frozen_tundra':
-        if (player.actionsLeft > 0) {
-          player.actionsLeft = Math.max(0, player.actionsLeft - 1);
-          emit('log', `${player.name} enters Frozen Tundra and loses 1 Action.`);
-        }
-        break;
       case 'city':
-        if (state.freeItemRound && tile.id === state.freeItemTileId) {
+        if (state.freeItemRound && tile.type === 'city') {
           for (let i = 0; i < state.freeItemCount; i++) {
             const item = _drawItem(state.freeItemTier);
             if (item) _giveItem(player, item);
@@ -362,10 +388,6 @@ const GS = (() => {
           }
         }
         break;
-      case 'wasteland':
-        _dealDamage(player, null, 1);
-        emit('log', `${player.name} takes 1 damage from the Wasteland!`);
-        break;
       case 'cave':
         if (player.combatCards.length > 0) {
           state.pendingAction = { type: 'cave_discard', playerId: player.id };
@@ -374,9 +396,7 @@ const GS = (() => {
           emit('log', `${player.name} enters the Cave but has no combat cards to discard.`);
         }
         break;
-      case 'meadow':
-        emit('log', `${player.name} enters a peaceful Meadow.`);
-        break;
+      // wasteland/frozen_tundra/meadow penalties handled at start of turn
     }
   }
 
@@ -942,7 +962,13 @@ const GS = (() => {
     const tile = getTile(p.tileId);
     if (p.actionsLeft < 1) { emit('error', 'Not enough actions.'); return; }
     if (tile.type === 'tower') {
-      emit('tower_prompt', { tileId: tile.id, towerUsed: p.towerUsed });
+      // Collect rotatable tiles so Tower can also offer wall rotation
+      const adjIds = getAdjacentTileIds(p.tileId, state.tiles);
+      const rotatableTileIds = [p.tileId, ...adjIds].filter(id => {
+        const t = getTile(id);
+        return t && t.hasWalls && !t.removed;
+      });
+      emit('tower_prompt', { tileId: tile.id, towerUsed: p.towerUsed, rotatableTileIds });
     } else {
       // Collect current tile + adjacent tiles that have walls
       const adjIds = getAdjacentTileIds(p.tileId, state.tiles);
@@ -1437,7 +1463,7 @@ const GS = (() => {
     activateBerserker,
     beginInteract, commitRotateTile, commitTowerAction,
     buyUpgrade,
-    actionDrawCards,
+    actionDrawCards, interruptDrawCard,
     useItem,
     resolveDisplace, resolveTeleport, resolvePush,
     resolveMindDrain, resolveWorldShaper, resolveSalvage, resolveCaveDiscard,
