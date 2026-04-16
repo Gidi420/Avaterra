@@ -23,29 +23,20 @@ const GS = (() => {
   function init(playerSetups) {
     // playerSetups: [{name, characterId}, ...]
     const types = shuffle([...TILE_TYPE_POOL]);
-    // Determine which tiles get walls based on type
-    const standardWallGiven = {};
-    const walledIndices = new Set();
-    types.forEach((type, i) => {
-      if (ALWAYS_WALLED_TYPES.includes(type)) {
-        walledIndices.add(i);
-      } else if (STANDARD_TERRAIN_TYPES.includes(type) && !standardWallGiven[type]) {
-        standardWallGiven[type] = true;
-        walledIndices.add(i);
-      }
-    });
-
     const tiles = TILE_LAYOUT.map((pos, i) => {
       const type = types[i];
-      const isWalled = walledIndices.has(i);
+      // Rulebook: standard terrains each have 1 wall; tower/city have 2 walls; others have none
+      const isTwoWall  = (type === 'city' || type === 'tower');
+      const isOneWall  = STANDARD_TERRAIN_TYPES.includes(type);
+      const isWalled   = isTwoWall || isOneWall;
       return {
         ...pos,
         type,
         hasWalls:     isWalled,
-        wallConfig:   isWalled ? 0b0101 : 0,
+        wallConfig:   isTwoWall ? 0b0101 : (isOneWall ? 0b0001 : 0),
         wallRotation: isWalled ? Math.floor(Math.random() * 4) : 0,
         removed:      false,
-        drawCount:    0, // for mountains tiles
+        drawCount:    0,
         hasMonster:   STANDARD_TERRAIN_TYPES.includes(type),
       };
     });
@@ -337,6 +328,23 @@ const GS = (() => {
     emit('state_changed', state);
   }
 
+  function resolvePhantomBolt(attackerId, targetIds) {
+    const attacker = getPlayer(attackerId);
+    if (!attacker) return;
+    const hits = (targetIds || []).slice(0, 2);
+    hits.forEach(tid => {
+      const victim = getPlayer(tid);
+      if (!victim || !victim.alive) return;
+      const dmg = Math.max(1, attacker.damage + (attacker.bonusDamageNext || 0) - (victim.armorReduction || 0));
+      _dealDamage(victim, attacker, dmg);
+      emit('log', `⚡ Phantom Bolt hits ${victim.name} for ${dmg} damage!`);
+      _checkAlive(victim);
+    });
+    attacker.bonusDamageNext = 0;
+    emit('state_changed', state);
+    emit('phase_changed', { subphase: 'action_select' });
+  }
+
   // ── Move action ───────────────────────────────────────────
   function beginMove() {
     const p = currentPlayer();
@@ -378,7 +386,7 @@ const GS = (() => {
             if (item) _giveItem(player, item);
           }
           emit('log', `${player.name} receives ${state.freeItemCount} free item(s) from the City!`);
-          state.freeItemRound = false;
+          // freeItemRound stays true all round so multiple players can benefit
         } else {
           if (player.xp < 1) {
             emit('log', `${player.name} cannot afford the City entry cost (1 XP).`);
@@ -514,45 +522,85 @@ const GS = (() => {
   }
 
   function commitShadowPlunder(targetId) {
-    const p  = currentPlayer();
+    const p   = currentPlayer();
     const tgt = getPlayer(targetId);
-    // Discard 1 combat card
-    const card = p.combatCards.pop();
-    state.decks.combatDiscard.push(card);
-
-    // Target can "block" – for now: if target has a combat card, they may spend it to block
-    // In hotseat: prompt target player
-    state.pendingAction = { type: 'shadow_plunder_block', attackerId: p.id, defenderId: targetId };
-    emit('shadow_plunder_prompt', { attackerId: p.id, defenderId: targetId, targetName: tgt.name });
+    if (!tgt || !tgt.alive || tgt.items.length === 0) { emit('error', 'Invalid target.'); return; }
+    if (p.combatCards.length === 0) { emit('error', 'No combat cards to play.'); return; }
+    state.pendingAction = {
+      type:       'shadow_plunder_block',
+      attackerId: p.id,
+      defenderId: targetId,
+      phase:      'attacker_select',
+      attackerCard: null,
+      defenderCard: null,
+    };
+    emit('shadow_plunder_prompt', { attackerId: p.id, defenderId: targetId, phase: 'attacker_select' });
   }
 
-  function resolveShadowPlunder(blocked) {
-    if (!state.pendingAction || state.pendingAction.type !== 'shadow_plunder_block') return;
-    const { attackerId, defenderId } = state.pendingAction;
-    const attacker = getPlayer(attackerId);
-    const defender = getPlayer(defenderId);
+  function selectShadowPlunderCard(playerId, cardUid) {
+    const pa = state.pendingAction;
+    if (!pa || pa.type !== 'shadow_plunder_block') return;
+    cardUid = parseInt(cardUid);
+    const player = getPlayer(playerId);
+
+    // Defender with no cards passes -1 → auto-fail (item stolen)
+    if (pa.phase === 'defender_select' && playerId === pa.defenderId && (cardUid < 0 || player.combatCards.length === 0)) {
+      pa.defenderCard = null;
+      _finalizeShadowPlunder();
+      return;
+    }
+
+    const card = player.combatCards.find(c => c.uid === cardUid);
+    if (!card) { emit('error', 'Card not found.'); return; }
+
+    if (pa.phase === 'attacker_select' && playerId === pa.attackerId) {
+      pa.attackerCard = cardUid;
+      pa.phase        = 'defender_select';
+      player.combatCards = player.combatCards.filter(c => c.uid !== cardUid);
+      state.decks.combatDiscard.push(card);
+      emit('shadow_plunder_prompt', { attackerId: pa.attackerId, defenderId: pa.defenderId, phase: 'defender_select' });
+    } else if (pa.phase === 'defender_select' && playerId === pa.defenderId) {
+      pa.defenderCard = cardUid;
+      player.combatCards = player.combatCards.filter(c => c.uid !== cardUid);
+      state.decks.combatDiscard.push(card);
+      _finalizeShadowPlunder();
+    }
+  }
+
+  function _finalizeShadowPlunder() {
+    const pa       = state.pendingAction;
+    const attacker = getPlayer(pa.attackerId);
+    const defender = getPlayer(pa.defenderId);
+    // Find the actual card objects from discard (they were just pushed)
+    const atkCard = state.decks.combatDiscard.slice().reverse().find(c => c.uid === pa.attackerCard);
+    const defCard = state.decks.combatDiscard.slice().reverse().find(c => c.uid === pa.defenderCard);
+    const blocked = atkCard && defCard && atkCard.type === defCard.type;
     state.pendingAction = null;
 
-    if (blocked && defender.combatCards.length > 0) {
-      const card = defender.combatCards.pop();
-      state.decks.combatDiscard.push(card);
-      emit('log', `${defender.name} blocks Shadow-Plunder!`);
+    if (blocked) {
+      emit('log', `${defender.name} blocks Shadow-Plunder (matched ${defCard.type})!`);
     } else {
       const steals = attacker.flags.steals2 ? 2 : 1;
       for (let i = 0; i < steals && defender.items.length > 0; i++) {
-        const idx = Math.floor(Math.random() * defender.items.length);
+        const idx  = Math.floor(Math.random() * defender.items.length);
         const item = defender.items.splice(idx, 1)[0];
         _giveItem(attacker, item);
         emit('log', `${attacker.name} steals ${item.name} from ${defender.name}!`);
       }
-      // Draw 1 combat card on success
       _drawCombatCardsForPlayer(attacker, 1);
     }
+    emit('shadow_plunder_reveal', {
+      attackerId: pa.attackerId, defenderId: pa.defenderId,
+      attackerCardType: atkCard ? atkCard.type : null,
+      defenderCardType: defCard ? defCard.type : null,
+      blocked,
+    });
     state.subphase = 'action_select';
-    emit('combat_end', { attackerWon: false }); // hide combat overlay
     emit('state_changed', state);
     emit('phase_changed', { subphase: 'action_select' });
   }
+
+  function resolveShadowPlunder() { /* legacy stub — mini-combat handles itself */ }
 
   // ── Sanguine Ritual (Red) ────────────────────────────────
   function activateSanguineRitual() {
@@ -1273,9 +1321,40 @@ const GS = (() => {
         });
         emit('log', 'Chaos Orb! All opponents discard their entire Combat Card hands!');
         break;
-      case 'blink_strike': {
-        const allTargets = state.players.filter(t => t.alive && t.id !== player.id);
-        emit('blink_strike_prompt', { attackerId: player.id, targets: allTargets.map(t => t.id) });
+      case 'blink_strike':
+      case 'phantom_bolt': {
+        if (extra && extra.targetIds) {
+          // Apply direct hits ignoring walls
+          const hits = extra.targetIds.slice(0, 2);
+          hits.forEach(tid => {
+            const victim = getPlayer(tid);
+            if (victim) {
+              const dmg = Math.max(1, player.damage + (player.bonusDamageNext || 0) - (victim.armorReduction || 0));
+              _dealDamage(victim, player, dmg);
+              emit('log', `⚡ Phantom Bolt hits ${victim.name} for ${dmg} damage!`);
+              _checkAlive(victim);
+            }
+          });
+          player.bonusDamageNext = 0;
+          emit('state_changed', state);
+          emit('phase_changed', { subphase: 'action_select' });
+          return;
+        }
+        if (item.effect === 'blink_strike') {
+          const allTargets = state.players.filter(t => t.alive && t.id !== player.id);
+          emit('blink_strike_prompt', { attackerId: player.id, targets: allTargets.map(t => t.id) });
+        } else {
+          // Find all adjacent players ignoring wall blocking
+          const fromTile = getTile(player.tileId);
+          const adjNoWalls = state.tiles.filter(o => {
+            if (o.removed || o.id === player.tileId) return false;
+            const dr = Math.abs(o.row - fromTile.row), dc = Math.abs(o.col - fromTile.col);
+            return (dr === 1 && dc === 0) || (dr === 0 && dc === 1);
+          }).map(o => o.id);
+          const targets = state.players.filter(t => t.alive && t.id !== player.id && adjNoWalls.includes(t.tileId));
+          if (targets.length === 0) { emit('error', 'No targets in range for Phantom Bolt.'); return; }
+          emit('phantom_bolt_prompt', { attackerId: player.id, targets: targets.map(t => t.id) });
+        }
         break;
       }
     }
@@ -1303,6 +1382,10 @@ const GS = (() => {
   }
 
   function resolvePush(pushedId, newTileId) {
+    if (state.scheduledRemoval.includes(newTileId)) {
+      emit('error', 'Cannot push into the Void — that tile is marked for removal!');
+      return;
+    }
     const p = getPlayer(pushedId);
     const prev = p.tileId;
     p.tileId = newTileId;
@@ -1468,6 +1551,7 @@ const GS = (() => {
     resolveDisplace, resolveTeleport, resolvePush,
     resolveMindDrain, resolveWorldShaper, resolveSalvage, resolveCaveDiscard,
     resolveVandalism, resolveSanguineChoice, cancelInteract,
+    selectShadowPlunderCard, resolvePhantomBolt,
     buyItemFromDeck,
   };
 })();

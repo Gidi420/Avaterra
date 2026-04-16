@@ -132,7 +132,7 @@ const TILE_LAYOUT = [
 // Total: 2+4+6+6+4+2 = 24 ✓
 
 // Tiles that always have walls (by type). Standard terrains: 1 of each type gets walls during init.
-const ALWAYS_WALLED_TYPES = ['city', 'tower', 'wasteland', 'cave'];
+const ALWAYS_WALLED_TYPES = ['city', 'tower'];
 const STANDARD_TERRAIN_TYPES = ['forest', 'swamp', 'desert', 'meadow'];
 
 // Tile type distribution (shuffled at game start)
@@ -173,6 +173,7 @@ const ITEMS = [
   { id: 'kidnapping',      tier: 'gold',   name: 'Kidnapping',      icon: '🌪',  desc: 'Move an opponent from their current tile to any other tile on the board.',         timing: 'own_turn',  effect: 'displace' },
   { id: 'terrain_mod',     tier: 'gold',   name: 'Terrain Mod',     icon: '🗺',  desc: 'Remove a tile from the board OR restore a previously removed tile.',              timing: 'own_turn',  effect: 'world_shaper' },
   { id: 'stun',            tier: 'gold',   name: 'Stun',            icon: '⏱',  desc: "End an opponent's turn immediately (can be used on any player's turn).",         timing: 'reaction',  effect: 'time_stop' },
+  { id: 'phantom_bolt',    tier: 'gold',   name: 'Phantom Bolt',    icon: '⚡', desc: 'Fire a bolt ignoring walls. Hits up to 2 adjacent players for full damage. No counter allowed.', timing: 'own_turn',  effect: 'phantom_bolt' },
 ];
 
 // IDs that get extra copies so totals match rulebook (bronze=36, silver=36, gold=12)
@@ -182,7 +183,7 @@ const ITEM_EXTRA_COPIES = {
   // Silver: base 3, need 4 total → +1 each
   vandalism: 1, peek: 1, damage_modifier: 1, growth: 1, teleport: 1, swap_roles: 1, armor: 1, long_range_strike: 1, trash: 1,
   // Gold: base 2, need 3 total → +1 each
-  super_potion: 1, kidnapping: 1, terrain_mod: 1, stun: 1,
+  super_potion: 1, kidnapping: 1, terrain_mod: 1, stun: 1, phantom_bolt: 1,
 };
 
 function buildItemDeck() {
@@ -236,17 +237,40 @@ function shuffle(arr) {
 function getAdjacentTileIds(tileId, tiles) {
   const t = tiles.find(x => x.id === tileId);
   if (!t) return [];
-  return tiles
-    .filter(o => !o.removed)
-    .filter(o => {
-      const dr = Math.abs(o.row - t.row), dc = Math.abs(o.col - t.col);
-      return (dr === 1 && dc === 0) || (dr === 0 && dc === 1);
-    })
-    .filter(o => {
-      // Check wall blocking between t and o
-      return !isWallBlocking(t, o);
-    })
-    .map(o => o.id);
+  const DIRS = [[-1,0],[1,0],[0,-1],[0,1]];
+  const result = [];
+  for (const [dr, dc] of DIRS) {
+    const nr = t.row + dr, nc = t.col + dc;
+    let neighbor = tiles.find(o => !o.removed && o.row === nr && o.col === nc);
+    let isWrap = false;
+    if (!neighbor) {
+      // World wrap: find the tile at the opposite edge in same row/column
+      isWrap = true;
+      const live = tiles.filter(o => !o.removed);
+      if (dr !== 0) {
+        const col = live.filter(o => o.col === t.col);
+        if (col.length > 0) {
+          neighbor = dr === -1
+            ? col.reduce((a,b) => b.row > a.row ? b : a)   // north → southernmost
+            : col.reduce((a,b) => b.row < a.row ? b : a);  // south → northernmost
+        }
+      } else {
+        const row = live.filter(o => o.row === t.row);
+        if (row.length > 0) {
+          neighbor = dc === -1
+            ? row.reduce((a,b) => b.col > a.col ? b : a)   // west → easternmost
+            : row.reduce((a,b) => b.col < a.col ? b : a);  // east → westernmost
+        }
+      }
+    }
+    if (neighbor && neighbor.id !== tileId) {
+      // Wall blocking only applies to direct (non-wrap) connections
+      if (isWrap || !isWallBlocking(t, neighbor)) {
+        if (!result.includes(neighbor.id)) result.push(neighbor.id);
+      }
+    }
+  }
+  return result;
 }
 
 function isWallBlocking(fromTile, toTile) {

@@ -11,6 +11,7 @@ const UI = (() => {
 
   let _pendingTileClick = null; // callback waiting for tile click
   let _pendingPlayerClick = null;
+  let _charSelectDefaults = null;
 
   // ── Init ──────────────────────────────────────────────────
   function init() {
@@ -45,6 +46,8 @@ const UI = (() => {
     GS.on('vandalism_prompt',      _onVandalismPrompt);
     GS.on('sanguine_prompt',       _onSanguinePrompt);
     GS.on('rotate_tile_pick_prompt', _onRotateTilePickPrompt);
+    GS.on('shadow_plunder_reveal',   _onShadowPlunderReveal);
+    GS.on('phantom_bolt_prompt',     _onPhantomBoltPrompt);
   }
 
   // ══════════════════════════════════════════════════════════
@@ -142,8 +145,11 @@ const UI = (() => {
         o.textContent = `${c.name} — ${c.lore} (HP:${c.hp} DMG:${c.damage})`;
         charSel.appendChild(o);
       });
-      // Default: stagger selections
-      charSel.value = CHARACTERS[i % CHARACTERS.length].id;
+      // Default: random character per player (shuffled so no two start with same)
+      if (!_charSelectDefaults) {
+        _charSelectDefaults = [...CHARACTERS].sort(() => Math.random() - 0.5).map(c => c.id);
+      }
+      charSel.value = _charSelectDefaults[i % _charSelectDefaults.length];
 
       // Character card preview
       const preview = document.createElement('div');
@@ -885,18 +891,49 @@ const UI = (() => {
     _showModal('Mind-Link Reveal', html, [{ label: 'OK', cls: 'btn-primary', onclick: _closeModal }]);
   }
 
-  function _onShadowPlunderPrompt({ attackerId, defenderId, targetName }) {
+  function _onShadowPlunderPrompt({ attackerId, defenderId, phase }) {
+    const atk = GS.getPlayer(attackerId);
     const def = GS.getPlayer(defenderId);
-    const canBlock = def.combatCards.length > 0;
-    _buildPassDeviceScreen(targetName, `respond to Shadow-Plunder`, () => {
-      _showModal(`${targetName}: Shadow-Plunder!`, `
-        <p>${GS.getPlayer(attackerId).name} is stealing from you!</p>
-        ${canBlock ? '<p>You can spend 1 Combat Card to block.</p>' : '<p>You have no cards to block with.</p>'}
-      `, [
-        canBlock ? { label: '🛡 Block (spend 1 Combat Card)', cls: 'btn-primary', onclick: () => { GS.resolveShadowPlunder(true); _closeModal(); }} : null,
-        { label: '😞 Allow', cls: 'btn-cancel', onclick: () => { GS.resolveShadowPlunder(false); _closeModal(); }},
-      ].filter(Boolean));
-    });
+    if (phase === 'attacker_select') {
+      _buildPassDeviceScreen(atk.name, 'play a card for Shadow-Plunder', () => {
+        _buildCardSelector(atk,
+          `🃏 Shadow-Plunder — <b>${atk.name}</b> attacks <b>${def.name}</b><br>
+           <small>Play a card. Defender must match to protect their item.</small>`,
+          uid => GS.selectShadowPlunderCard(atk.id, uid));
+      });
+    } else if (phase === 'defender_select') {
+      _buildPassDeviceScreen(def.name, 'defend against Shadow-Plunder', () => {
+        if (def.combatCards.length === 0) {
+          _showModal('Shadow-Plunder!', `<p>${def.name} has no cards — item stolen!</p>`, [
+            { label: 'OK', cls: 'btn-primary', onclick: () => { _closeModal(); GS.selectShadowPlunderCard(def.id, -1); }},
+          ]);
+        } else {
+          _buildCardSelector(def,
+            `🛡 Shadow-Plunder — <b>${def.name}</b> defends<br>
+             <small>Match the attacker's card type to protect your item.</small>`,
+            uid => GS.selectShadowPlunderCard(def.id, uid));
+        }
+      });
+    }
+  }
+
+  function _onShadowPlunderReveal({ attackerId, defenderId, attackerCardType, defenderCardType, blocked }) {
+    const atk = GS.getPlayer(attackerId);
+    const def = GS.getPlayer(defenderId);
+    const atkIcon = attackerCardType ? (COMBAT_CARD_ICONS[attackerCardType] || attackerCardType) : '?';
+    const defIcon = defenderCardType ? (COMBAT_CARD_ICONS[defenderCardType] || defenderCardType) : '—';
+    _showModal('Shadow-Plunder Result', `
+      <div class="reveal-row">
+        <div class="reveal-player"><div class="reveal-name">${atk.name}</div>
+          <div class="combat-card-big type-${attackerCardType||'none'}">${atkIcon}<br>${(attackerCardType||'').toUpperCase()}</div></div>
+        <div class="vs-text">VS</div>
+        <div class="reveal-player"><div class="reveal-name">${def.name}</div>
+          <div class="combat-card-big type-${defenderCardType||'none'}">${defIcon}<br>${(defenderCardType||'').toUpperCase()}</div></div>
+      </div>
+      <div class="reveal-result">${blocked
+        ? `<span class="win">Blocked! ${def.name} keeps their item.</span>`
+        : `<span class="lose">Stolen! ${atk.name} takes the item.</span>`}</div>
+    `, [{ label: 'Continue', cls: 'btn-primary', onclick: _closeModal }]);
   }
 
   function _onEmergencyDraw({ defenderId }) {
@@ -1018,14 +1055,22 @@ const UI = (() => {
   }
 
   function _onPeekReveal({ viewerId, targetId, hand }) {
-    const tgt = GS.getPlayer(targetId);
-    let html = `<b>${tgt.name}'s Combat Hand:</b><div class="hand-reveal">`;
-    if (hand.length === 0) html += '<em>Empty</em>';
-    hand.forEach(card => {
-      html += `<span class="combat-card-mini" style="background:${COMBAT_CARD_COLORS[card.type]}">${COMBAT_CARD_ICONS[card.type]} ${card.type}</span>`;
+    const viewer = GS.getPlayer(viewerId);
+    const tgt    = GS.getPlayer(targetId);
+    _buildPassDeviceScreen(viewer.name, `peek at ${tgt.name}'s hand`, () => {
+      let html = `<p><b>${tgt.name}'s</b> full Combat Hand (${hand.length} card${hand.length !== 1 ? 's' : ''}):</p>
+        <div class="hand-reveal">`;
+      if (hand.length === 0) {
+        html += '<em style="color:#888">— empty —</em>';
+      } else {
+        hand.forEach(card => {
+          html += `<span class="combat-card-mini" style="background:${COMBAT_CARD_COLORS[card.type]};padding:8px 12px;font-size:14px">
+            ${COMBAT_CARD_ICONS[card.type]} ${card.type.toUpperCase()}</span>`;
+        });
+      }
+      html += '</div>';
+      _showModal(`👁 Peek — ${viewer.name}`, html, [{ label: 'Done', cls: 'btn-primary', onclick: _closeModal }]);
     });
-    html += '</div>';
-    _showModal('Crystal Eye', html, [{ label: 'OK', cls: 'btn-primary', onclick: _closeModal }]);
   }
 
   function _onWorldShaper({ tiles }) {
@@ -1073,6 +1118,39 @@ const UI = (() => {
       GS.commitSeekingArrow(targetId);
       _closeModal();
     });
+  }
+
+  function _onPhantomBoltPrompt({ attackerId, targets }) {
+    const atk      = GS.getPlayer(attackerId);
+    const selected = [];
+    function rebuild() {
+      let h = `<p><b>${atk.name}</b> fires Phantom Bolt (ignores walls). Select up to 2 targets:</p>
+        <div class="hand-reveal">`;
+      targets.forEach(id => {
+        const p   = GS.getPlayer(id);
+        const sel = selected.includes(id);
+        h += `<button style="background:${sel?'#4a1a3a':'#1a1a3a'};border:2px solid ${sel?'#ff44aa':'#5555aa'};
+              color:#eee;border-radius:6px;padding:8px 14px;cursor:pointer;margin:3px;"
+              onclick="UI._pbToggle(${id})">${p.name}${sel?' ✓':''}</button>`;
+      });
+      h += '</div>';
+      return h;
+    }
+    UI._pbToggle = (id) => {
+      const idx = selected.indexOf(id);
+      if (idx === -1) { if (selected.length < 2) selected.push(id); }
+      else selected.splice(idx, 1);
+      const body = document.querySelector('#modal-overlay .modal-body');
+      if (body) body.innerHTML = rebuild();
+    };
+    _showModal('⚡ Phantom Bolt', rebuild(), [
+      { label: 'Fire!', cls: 'btn-primary', onclick: () => {
+        if (selected.length === 0) { _toast('Select at least 1 target.', 'error'); return; }
+        _closeModal();
+        GS.resolvePhantomBolt(attackerId, selected);
+      }},
+      { label: 'Cancel', cls: 'btn-cancel', onclick: _closeModal },
+    ]);
   }
 
   function _onVoidRift({ playerId, others }) {
@@ -1395,5 +1473,6 @@ const UI = (() => {
     _useSalvageItem,
     _pickInteractTile,
     _resolveVandalism,
+    _pbToggle: (id) => { /* set at runtime by _onPhantomBoltPrompt */ },
   };
 })();

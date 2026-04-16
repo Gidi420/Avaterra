@@ -362,11 +362,11 @@ class GameScene extends Phaser.Scene {
       const { x, y } = this._tileXY(tile);
       const gfx = this.add.graphics().setDepth(5);
       // Pulsing orange border
-      gfx.lineStyle(4, 0xff6600, 0.9);
+      gfx.lineStyle(4, 0xff44aa, 0.9);
       gfx.strokeRect(x - this.TILE_W / 2 + 2, y - this.TILE_H / 2 + 2, this.TILE_W - 4, this.TILE_H - 4);
       // Warning text
       const txt = this.add.text(x, y + this.TILE_H / 2 - 10, '⚠', {
-        fontSize: '13px', color: '#ff6600',
+        fontSize: '13px', color: '#ff44aa',
       }).setOrigin(0.5).setDepth(6);
       // Pulse tween
       this.tweens.add({
