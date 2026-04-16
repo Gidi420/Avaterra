@@ -2,7 +2,7 @@
 // Multiplayer.js  –  Firebase Realtime Database room system
 // ============================================================
 
-const Multiplayer = (() => {
+var Multiplayer = (() => {
 
   let _db             = null;
   let _roomId         = null;
