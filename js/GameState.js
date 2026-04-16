@@ -1528,10 +1528,34 @@ const GS = (() => {
     emit('state_changed', state);
   }
 
+  // ── Remote state injection (multiplayer) ──────────────────
+  function setState(remoteState) {
+    if (!remoteState) return;
+    state = remoteState;
+    emit('state_changed', state);
+    // Re-fire pending prompts so the right client sees their UI
+    if (state.pendingAction) {
+      const pa = state.pendingAction;
+      if (pa.type === 'cave_discard') {
+        const p = getPlayer(pa.playerId);
+        if (p) emit('cave_discard_prompt', { playerId: pa.playerId, hand: p.combatCards });
+      } else if (pa.type === 'shadow_plunder_block') {
+        emit('shadow_plunder_prompt', { attackerId: pa.attackerId, defenderId: pa.defenderId, phase: pa.phase });
+      }
+    }
+    if (state.combat) {
+      emit('combat_update', state.combat);
+    }
+    if (state.phase === 'gameover') {
+      const winner = state.players.find(p => p.alive);
+      emit('game_over', { winner: winner ? winner.id : null });
+    }
+  }
+
   // ── Public API ────────────────────────────────────────────
   return {
     on, emit, getState, currentPlayer, getPlayer, getTile,
-    init, endTurn,
+    init, setState, endTurn,
     beginMove, commitMove,
     beginAttack, commitAttack,
     resolveEmergencyDraw,

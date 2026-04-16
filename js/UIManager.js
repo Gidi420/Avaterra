@@ -16,6 +16,12 @@ const UI = (() => {
   // ── Init ──────────────────────────────────────────────────
   function init() {
     _buildCharSelectScreen();
+    // Sync state to Firebase whenever it changes (multiplayer)
+    GS.on('state_changed', s => {
+      if (window.Multiplayer && Multiplayer.isActive() && !Multiplayer.isApplyingRemote()) {
+        Multiplayer.pushState(s);
+      }
+    });
     GS.on('state_changed',         _onStateChanged);
     GS.on('phase_changed',         _onPhaseChanged);
     GS.on('combat_start',          _onCombatStart);
@@ -116,8 +122,98 @@ const UI = (() => {
     startBtn.onclick = _startGame;
     container.appendChild(startBtn);
 
+    // ── Online Multiplayer section ────────────────────────
+    if (window.Multiplayer && Multiplayer.isConfigured()) {
+      const divider = document.createElement('div');
+      divider.style.cssText = 'border-top:1px solid #2a2a5a;margin:18px 0 12px;text-align:center;color:#666;font-size:12px;padding-top:12px;';
+      divider.textContent = '— or play online —';
+      container.appendChild(divider);
+
+      const onlineBtn = document.createElement('button');
+      onlineBtn.className = 'btn btn-secondary big-btn';
+      onlineBtn.textContent = '🌐 Play Online (Multiplayer)';
+      onlineBtn.style.background = '#1a2a4a';
+      onlineBtn.onclick = () => {
+        const lobby = $('mp-lobby');
+        if (lobby) lobby.classList.toggle('hidden');
+      };
+      container.appendChild(onlineBtn);
+
+      _buildMpLobby(container);
+    } else if (window.Multiplayer) {
+      const cfg = document.createElement('p');
+      cfg.style.cssText = 'color:#555;font-size:11px;text-align:center;margin-top:16px;';
+      cfg.textContent = '🌐 Online play: fill in firebase-config.js to enable.';
+      container.appendChild(cfg);
+    }
+
     countSel.onchange = () => _renderPlayerSetup(parseInt(countSel.value));
     _renderPlayerSetup(2);
+  }
+
+  // ── Multiplayer lobby UI ─────────────────────────────────
+  function _buildMpLobby(container) {
+    const lobby = document.createElement('div');
+    lobby.id = 'mp-lobby';
+    lobby.className = 'hidden';
+    lobby.style.cssText = 'background:#0d0d22;border:1px solid #3a3a6a;border-radius:8px;padding:16px;margin-top:10px;';
+
+    // Check for ?room= URL param (auto-fill join code)
+    const urlRoom = new URLSearchParams(location.search).get('room');
+
+    lobby.innerHTML = `
+      <div style="display:flex;gap:8px;margin-bottom:14px;">
+        <button id="mp-tab-create" class="btn btn-primary" style="flex:1;opacity:${urlRoom?0.6:1}"
+          onclick="UI._mpTab('create')">➕ Create Room</button>
+        <button id="mp-tab-join" class="btn btn-secondary" style="flex:1;opacity:${urlRoom?1:0.6}"
+          onclick="UI._mpTab('join')">🔗 Join Room</button>
+      </div>
+
+      <!-- CREATE pane -->
+      <div id="mp-create-pane" style="display:${urlRoom?'none':'block'}">
+        <p style="color:#aaa;font-size:12px;margin-bottom:8px;">Pick your player count, enter your name and character above, then create a room.</p>
+        <label style="color:#888;font-size:12px;">Your name:</label>
+        <input id="mp-host-name" type="text" placeholder="Your name" value="Host"
+          style="width:100%;background:#1a1a3a;border:1px solid #3a3a6a;color:#ccc;border-radius:4px;padding:5px 8px;margin:4px 0 8px;">
+        <label style="color:#888;font-size:12px;">Your character:</label>
+        <select id="mp-host-char" style="width:100%;background:#1a1a3a;border:1px solid #3a3a6a;color:#ccc;border-radius:4px;padding:5px 8px;margin:4px 0 8px;">
+          ${CHARACTERS.map(c => `<option value="${c.id}">${c.name} — ${c.lore}</option>`).join('')}
+        </select>
+        <label style="color:#888;font-size:12px;">Number of players:</label>
+        <select id="mp-player-count" style="width:100%;background:#1a1a3a;border:1px solid #3a3a6a;color:#ccc;border-radius:4px;padding:5px 8px;margin:4px 0 8px;">
+          ${[2,3,4,5,6].map(n=>`<option value="${n}">${n} Players</option>`).join('')}
+        </select>
+        <button class="btn btn-primary big-btn" style="margin-top:6px;"
+          onclick="UI._mpCreateRoom()">Create Room</button>
+      </div>
+
+      <!-- JOIN pane -->
+      <div id="mp-join-pane" style="display:${urlRoom?'block':'none'}">
+        <label style="color:#888;font-size:12px;">Your name:</label>
+        <input id="mp-join-name" type="text" placeholder="Your name" value="Player"
+          style="width:100%;background:#1a1a3a;border:1px solid #3a3a6a;color:#ccc;border-radius:4px;padding:5px 8px;margin:4px 0 8px;">
+        <label style="color:#888;font-size:12px;">Your character:</label>
+        <select id="mp-join-char" style="width:100%;background:#1a1a3a;border:1px solid #3a3a6a;color:#ccc;border-radius:4px;padding:5px 8px;margin:4px 0 8px;">
+          ${CHARACTERS.map(c => `<option value="${c.id}">${c.name} — ${c.lore}</option>`).join('')}
+        </select>
+        <label style="color:#888;font-size:12px;">Room Code:</label>
+        <input id="mp-room-code" type="text" placeholder="6-char code" maxlength="6"
+          style="width:100%;background:#1a1a3a;border:1px solid #3a3a6a;color:#ccc;border-radius:4px;padding:5px 8px;margin:4px 0 8px;text-transform:uppercase;"
+          value="${urlRoom || ''}">
+        <button class="btn btn-primary big-btn" style="margin-top:6px;"
+          onclick="UI._mpJoinRoom()">Join Room</button>
+      </div>
+
+      <!-- WAITING room (shown after create/join) -->
+      <div id="mp-waiting" style="display:none">
+        <div id="mp-room-info" style="text-align:center;margin-bottom:12px;"></div>
+        <div id="mp-player-slots"></div>
+        <button id="mp-start-btn" class="btn btn-primary big-btn" style="display:none;margin-top:10px;"
+          onclick="UI._mpStartGame()">▶ Start Game</button>
+        <p id="mp-waiting-msg" style="color:#888;font-size:12px;text-align:center;margin-top:8px;"></p>
+      </div>
+    `;
+    container.appendChild(lobby);
   }
 
   function _renderPlayerSetup(count) {
@@ -826,6 +922,31 @@ const UI = (() => {
   }
 
   function _buildPassDeviceScreen(playerName, action, onReady) {
+    // In online multiplayer: if this player is me → skip the pass screen and act immediately;
+    // if it's someone else → show a "waiting" screen instead.
+    if (window.Multiplayer && Multiplayer.isActive()) {
+      const myPlayer = GS.getPlayer(Multiplayer.getMyIndex());
+      const isMe = myPlayer && myPlayer.name === playerName;
+      if (isMe) {
+        onReady();   // my turn — act immediately
+        return;
+      }
+      // Another player's turn — show waiting screen
+      const el = $('combat-overlay');
+      el.innerHTML = '';
+      el.classList.remove('hidden');
+      const box = document.createElement('div');
+      box.className = 'combat-box pass-device';
+      box.innerHTML = `
+        <div class="pass-icon">⏳</div>
+        <div class="pass-title">Waiting for</div>
+        <div class="pass-name">${playerName}</div>
+        <div class="pass-action">to ${action}…</div>
+        <p style="color:#666;font-size:11px;margin-top:12px">Their screen will update automatically.</p>`;
+      el.appendChild(box);
+      return;
+    }
+    // ── Hotseat (original behaviour) ──────────────────────
     const el = $('combat-overlay');
     el.innerHTML = '';
     el.classList.remove('hidden');
@@ -1458,6 +1579,109 @@ const UI = (() => {
     ]);
   }
 
+  // ══════════════════════════════════════════════════════════
+  //  MULTIPLAYER LOBBY ACTIONS
+  // ══════════════════════════════════════════════════════════
+
+  function _mpTab(tab) {
+    $('mp-create-pane').style.display = tab === 'create' ? 'block' : 'none';
+    $('mp-join-pane').style.display   = tab === 'join'   ? 'block' : 'none';
+    $('mp-tab-create').style.opacity  = tab === 'create' ? '1' : '0.6';
+    $('mp-tab-join').style.opacity    = tab === 'join'   ? '1' : '0.6';
+  }
+
+  async function _mpCreateRoom() {
+    const name    = ($('mp-host-name').value || 'Host').trim();
+    const charId  = $('mp-host-char').value;
+    const count   = parseInt($('mp-player-count').value);
+    try {
+      const roomId = await Multiplayer.createRoom(count, name, charId);
+      _mpShowWaiting(roomId, 0, count, true);
+    } catch (e) {
+      _toast(e.message, 'error');
+    }
+  }
+
+  async function _mpJoinRoom() {
+    const name   = ($('mp-join-name').value || 'Player').trim();
+    const charId = $('mp-join-char').value;
+    const code   = ($('mp-room-code').value || '').toUpperCase().trim();
+    if (!code) { _toast('Enter a room code.', 'error'); return; }
+    try {
+      const slot = await Multiplayer.joinRoom(code, name, charId);
+      _mpShowWaiting(code, slot, null, false);
+    } catch (e) {
+      _toast(e.message, 'error');
+    }
+  }
+
+  function _mpShowWaiting(roomId, mySlot, playerCount, isHost) {
+    // Hide create/join panes, show waiting
+    $('mp-create-pane').style.display = 'none';
+    $('mp-join-pane').style.display   = 'none';
+    $('mp-waiting').style.display     = 'block';
+
+    const inviteUrl = Multiplayer.getInviteUrl();
+    $('mp-room-info').innerHTML = `
+      <div style="font-size:22px;font-weight:bold;letter-spacing:4px;color:#aaddff">${roomId}</div>
+      <div style="font-size:11px;color:#666;margin-top:4px;">Share this link with others:</div>
+      <input readonly value="${inviteUrl}" style="width:100%;background:#0a0a1a;border:1px solid #3a3a6a;color:#88aaff;border-radius:4px;padding:4px 8px;font-size:11px;margin-top:4px;"
+        onclick="this.select()">
+    `;
+
+    // Listen for player changes
+    Multiplayer.onPlayersChanged((players) => {
+      const slots = $('mp-player-slots');
+      if (!slots) return;
+      slots.innerHTML = '';
+      Object.entries(players).forEach(([idx, p]) => {
+        const char = CHARACTERS.find(c => c.id === p.characterId);
+        const me   = parseInt(idx) === mySlot;
+        slots.innerHTML += `<div style="padding:5px 8px;border-radius:4px;margin:3px 0;
+          background:${me?'#1a2a4a':'#111120'};border:1px solid ${me?'#3355aa':'#2a2a4a'};
+          font-size:13px;color:${char?char.color:'#ccc'}">
+          ${me ? '▶ ' : ''}Player ${parseInt(idx)+1}: ${p.name} — ${char?char.name:p.characterId}
+          ${me ? '<span style="color:#666;font-size:11px"> (you)</span>' : ''}
+        </div>`;
+      });
+
+      // Host: show start button when all slots filled
+      if (isHost && playerCount) {
+        const filled  = Object.keys(players).length;
+        const startBtn = $('mp-start-btn');
+        const waitMsg  = $('mp-waiting-msg');
+        if (startBtn) startBtn.style.display = filled >= playerCount ? 'block' : 'none';
+        if (waitMsg)  waitMsg.textContent     = filled >= playerCount
+          ? 'All players have joined — you can start!'
+          : `Waiting for players… (${filled}/${playerCount} joined)`;
+      } else {
+        const waitMsg = $('mp-waiting-msg');
+        if (waitMsg) waitMsg.textContent = 'Waiting for the host to start the game…';
+      }
+    });
+
+    // Non-host: listen for game start
+    if (!isHost) {
+      Multiplayer.onGameStart(() => {
+        hide('char-select');
+        show('right-panel');
+      });
+    }
+  }
+
+  async function _mpStartGame() {
+    const s = GS.getState ? GS.getState() : null;
+    // Build playerSetups from Firebase players list
+    const snap = await firebase.database().ref(`rooms/${Multiplayer.getRoomId()}/players`).get();
+    const players = snap.val() || {};
+    const playerSetups = Object.entries(players)
+      .sort(([a],[b]) => parseInt(a) - parseInt(b))
+      .map(([,p]) => ({ name: p.name, characterId: p.characterId }));
+    await Multiplayer.startGame(playerSetups);
+    hide('char-select');
+    show('right-panel');
+  }
+
   // ── Expose some internals for inline onclick ───────────────
   return {
     init,
@@ -1474,5 +1698,7 @@ const UI = (() => {
     _pickInteractTile,
     _resolveVandalism,
     _pbToggle: (id) => { /* set at runtime by _onPhantomBoltPrompt */ },
+    // Multiplayer lobby actions (called from inline onclick)
+    _mpTab, _mpCreateRoom, _mpJoinRoom, _mpStartGame,
   };
 })();

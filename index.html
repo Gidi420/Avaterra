@@ -114,6 +114,10 @@
 <button id="debug-toggle-btn" onclick="DebugPanel.toggle()" title="God Mode">🛠</button>
 
 <!-- ── Scripts ───────────────────────────────────────────── -->
+<!-- Firebase (loaded before game code so Multiplayer.js can use it) -->
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+
 <!-- Phaser 3 -->
 <script src="https://cdn.jsdelivr.net/npm/phaser@3.60.0/dist/phaser.min.js"></script>
 
@@ -121,6 +125,8 @@
 <script src="js/data.js"></script>
 <script src="js/GameState.js"></script>
 <script src="js/GameScene.js"></script>
+<script src="js/firebase-config.js"></script>
+<script src="js/Multiplayer.js"></script>
 <script src="js/UIManager.js"></script>
 <script src="js/DebugPanel.js"></script>
 <script src="js/main.js"></script>
