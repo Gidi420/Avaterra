@@ -577,8 +577,6 @@ html, body {
 .gameover-winner { font-size: 36px; font-weight: bold; margin: 12px 0; }
 .gameover-char   { font-size: 18px; color: var(--text-dim); margin-bottom: 24px; }
 
-/* ── HUD wrapper ─────────────────────────────────────────── */
-#hud { display: contents; }
 
 /* ── Scrollbars ──────────────────────────────────────────── */
 ::-webkit-scrollbar { width: 5px; }

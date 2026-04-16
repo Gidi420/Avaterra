@@ -286,7 +286,7 @@ const UI = (() => {
       setups.push({ name, characterId: charId });
     }
     hide('char-select');
-    show('hud');
+    show('right-panel');
     GS.init(setups);
     _buildHUD();
   }
@@ -441,16 +441,20 @@ const UI = (() => {
       { id: 'btn-end',     label: '✅ End Turn',          onclick: () => _confirmEndTurn(),   enabled: true },
     ];
 
+    const notMyTurn = Multiplayer.isActive() && !Multiplayer.isMyTurn();
+
     const bar = $('action-bar');
     if (!bar) return;
     bar.innerHTML = '';
     actions.forEach(a => {
+      const enabled = a.enabled && !notMyTurn;
       const btn = document.createElement('button');
       btn.id = a.id;
-      btn.className = `action-btn${a.enabled ? '' : ' disabled'}`;
+      btn.className = `action-btn${enabled ? '' : ' disabled'}`;
       btn.innerHTML = a.label;
-      if (a.enabled) btn.onclick = a.onclick;
+      if (enabled) btn.onclick = a.onclick;
       if (a.tooltip) btn.title = a.tooltip;
+      if (notMyTurn) btn.title = "It's not your turn";
       bar.appendChild(btn);
     });
   }
@@ -1367,7 +1371,7 @@ const UI = (() => {
   //  GAME OVER
   // ══════════════════════════════════════════════════════════
   function _onGameOver({ winner }) {
-    hide('hud');
+    hide('right-panel');
     const p = winner !== null ? GS.getPlayer(winner) : null;
     const char = p ? CHARACTERS.find(c => c.id === p.characterId) : null;
     const el = $('gameover-overlay');
@@ -1663,23 +1667,38 @@ const UI = (() => {
     // Non-host: listen for game start
     if (!isHost) {
       Multiplayer.onGameStart(() => {
+        console.log('[UI] onGameStart fired, showing right-panel');
         hide('char-select');
+        const el = document.getElementById('right-panel');
+        console.log('[UI] right-panel element:', el, 'classes:', el && el.className);
         show('right-panel');
+        console.log('[UI] after show, classes:', el && el.className);
+        _buildHUD();
       });
     }
   }
 
   async function _mpStartGame() {
-    const s = GS.getState ? GS.getState() : null;
-    // Build playerSetups from Firebase players list
-    const snap = await firebase.database().ref(`rooms/${Multiplayer.getRoomId()}/players`).get();
-    const players = snap.val() || {};
-    const playerSetups = Object.entries(players)
-      .sort(([a],[b]) => parseInt(a) - parseInt(b))
-      .map(([,p]) => ({ name: p.name, characterId: p.characterId }));
-    await Multiplayer.startGame(playerSetups);
+    try {
+      // Build playerSetups from Firebase players list
+      const snap = await firebase.database().ref(`rooms/${Multiplayer.getRoomId()}/players`).get();
+      const players = snap.val() || {};
+      const playerSetups = Object.entries(players)
+        .sort(([a],[b]) => parseInt(a) - parseInt(b))
+        .map(([,p]) => ({ name: p.name, characterId: p.characterId }));
+      await Multiplayer.startGame(playerSetups);
+    } catch (e) {
+      _toast('Failed to start game: ' + e.message, 'error');
+      console.error('[_mpStartGame]', e);
+      return;
+    }
+    console.log('[UI] _mpStartGame: showing right-panel');
     hide('char-select');
+    const el = document.getElementById('right-panel');
+    console.log('[UI] right-panel element:', el, 'classes:', el && el.className);
     show('right-panel');
+    console.log('[UI] after show, classes:', el && el.className);
+    _buildHUD();
   }
 
   // ── Expose some internals for inline onclick ───────────────
