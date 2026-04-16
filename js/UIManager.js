@@ -1667,12 +1667,8 @@ const UI = (() => {
     // Non-host: listen for game start
     if (!isHost) {
       Multiplayer.onGameStart(() => {
-        console.log('[UI] onGameStart fired, showing right-panel');
         hide('char-select');
-        const el = document.getElementById('right-panel');
-        console.log('[UI] right-panel element:', el, 'classes:', el && el.className);
         show('right-panel');
-        console.log('[UI] after show, classes:', el && el.className);
         _buildHUD();
       });
     }
@@ -1692,12 +1688,8 @@ const UI = (() => {
       console.error('[_mpStartGame]', e);
       return;
     }
-    console.log('[UI] _mpStartGame: showing right-panel');
     hide('char-select');
-    const el = document.getElementById('right-panel');
-    console.log('[UI] right-panel element:', el, 'classes:', el && el.className);
     show('right-panel');
-    console.log('[UI] after show, classes:', el && el.className);
     _buildHUD();
   }
 
