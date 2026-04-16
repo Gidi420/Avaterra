@@ -11,11 +11,11 @@
 // ============================================================
 
 const FIREBASE_CONFIG = {
-  apiKey:            "PASTE_API_KEY_HERE",
-  authDomain:        "PASTE_AUTH_DOMAIN_HERE",
-  databaseURL:       "PASTE_DATABASE_URL_HERE",
-  projectId:         "PASTE_PROJECT_ID_HERE",
-  storageBucket:     "PASTE_STORAGE_BUCKET_HERE",
-  messagingSenderId: "PASTE_MESSAGING_SENDER_ID_HERE",
-  appId:             "PASTE_APP_ID_HERE",
+  apiKey:            "AIzaSyAXKeb-EjV4Yh0uFD-kKHA-c4H7DWSp_zg",
+  authDomain:        "avaterra-3b7b5.firebaseapp.com",
+  databaseURL:       "https://avaterra-3b7b5-default-rtdb.firebaseio.com",
+  projectId:         "avaterra-3b7b5",
+  storageBucket:     "avaterra-3b7b5.firebasestorage.app",
+  messagingSenderId: "573834395586",
+  appId:             "1:573834395586:web:57db894be1647a0584a7eb",
 };
