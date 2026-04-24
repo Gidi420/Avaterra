@@ -233,6 +233,14 @@ const UI = (() => {
 
     try {
       const slot = await Multiplayer.joinRoom(roomCode.toUpperCase(), name);
+
+      // _mpShowWaiting() needs the lobby DOM structure (mp-waiting, mp-room-info, etc.)
+      // which doesn't exist on the instant-join screen — rebuild it first.
+      container.innerHTML = '';
+      _buildMpLobby(container);
+      const lobbyEl = $('mp-lobby');
+      if (lobbyEl) lobbyEl.classList.remove('hidden');
+
       _mpShowWaiting(roomCode.toUpperCase(), slot, null, false);
     } catch (e) {
       _toast(e.message || 'Failed to join room.', 'error');
