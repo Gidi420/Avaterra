@@ -6,7 +6,8 @@ var Multiplayer = (() => {
 
   let _db             = null;
   let _roomId         = null;
-  let _myIndex        = null;   // which player slot I own (0-based)
+  let _myIndex        = null;   // Firebase slot index (0 = first to join)
+  let _myGsIndex      = null;   // GS players-array index (after turn-order shuffle)
   let _isHost         = false;
   let _applyingRemote = false;  // prevents push loops when applying incoming state
   let _onPlayersChangedCb = null;
@@ -39,18 +40,19 @@ var Multiplayer = (() => {
 
   // ── Accessors ─────────────────────────────────────────────
   function isActive()         { return _roomId !== null; }
-  function getMyIndex()       { return _myIndex; }
+  // Returns GS player array index (accounts for turn-order shuffle)
+  function getMyIndex()       { return _myGsIndex !== null ? _myGsIndex : _myIndex; }
   function isApplyingRemote() { return _applyingRemote; }
 
   function isMyTurn() {
     if (!isActive()) return true;
     const s = GS.getState();
-    return s && s.currentPlayerIndex === _myIndex;
+    return s && s.currentPlayerIndex === getMyIndex();
   }
 
   function isMyPlayer(playerIndex) {
-    if (!isActive()) return true;   // hotseat: always "mine"
-    return playerIndex === _myIndex;
+    if (!isActive()) return true;
+    return playerIndex === getMyIndex();
   }
 
   // ── Room code ─────────────────────────────────────────────
@@ -64,6 +66,7 @@ var Multiplayer = (() => {
     try {
       sessionStorage.setItem('mp_session', JSON.stringify({
         roomId: _roomId, myIndex: _myIndex, isHost: _isHost,
+        myGsIndex: _myGsIndex,
       }));
     } catch(e) {}
   }
@@ -81,11 +84,22 @@ var Multiplayer = (() => {
     if (!session || !session.roomId) return false;
     if (!_init()) return false;
     try {
-      const snap = await _db.ref(`rooms/${session.roomId}/status`).get();
-      if (!snap.exists() || snap.val() !== 'playing') { _clearSession(); return false; }
+      const snap = await _db.ref(`rooms/${session.roomId}`).get();
+      if (!snap.exists()) { _clearSession(); return false; }
+      const room = snap.val();
+      if (room.status !== 'playing') { _clearSession(); return false; }
+
       _roomId  = session.roomId;
       _myIndex = session.myIndex;
       _isHost  = session.isHost;
+
+      // Restore GS index from Firebase mapping or saved session
+      if (room.gsMapping && room.gsMapping[_myIndex] !== undefined) {
+        _myGsIndex = room.gsMapping[_myIndex];
+      } else {
+        _myGsIndex = session.myGsIndex !== null ? session.myGsIndex : _myIndex;
+      }
+
       _listenState();
       return true;
     } catch(e) {
@@ -98,9 +112,10 @@ var Multiplayer = (() => {
   // ── Create room ───────────────────────────────────────────
   async function createRoom(playerCount, myName) {
     if (!_init()) throw new Error('Firebase not configured — fill in firebase-config.js');
-    _roomId  = _genCode();
-    _myIndex = 0;
-    _isHost  = true;
+    _roomId    = _genCode();
+    _myIndex   = 0;
+    _myGsIndex = null;   // assigned when host starts game
+    _isHost    = true;
 
     await _db.ref(`rooms/${_roomId}`).set({
       created:     Date.now(),
@@ -130,24 +145,15 @@ var Multiplayer = (() => {
     while (taken.includes(slot)) slot++;
     if (slot >= room.playerCount) throw new Error('Room is full.');
 
-    _roomId  = roomId.toUpperCase();
-    _myIndex = slot;
-    _isHost  = false;
+    _roomId    = roomId.toUpperCase();
+    _myIndex   = slot;
+    _myGsIndex = null;  // assigned when host starts game
+    _isHost    = false;
 
     await _db.ref(`rooms/${_roomId}/players/${slot}`).set({ name: myName });
     _listenPlayers();
     _saveSession();
     return slot;
-  }
-
-  // ── Set character for my slot ─────────────────────────────
-  async function setMyCharacter(charId) {
-    if (!_db || !_roomId) return;
-    if (charId === null) {
-      await _db.ref(`rooms/${_roomId}/players/${_myIndex}/characterId`).remove();
-    } else {
-      await _db.ref(`rooms/${_roomId}/players/${_myIndex}/characterId`).set(charId);
-    }
   }
 
   // ── Listen for player list changes ───────────────────────
@@ -160,13 +166,19 @@ var Multiplayer = (() => {
   function onPlayersChanged(cb) { _onPlayersChangedCb = cb; }
 
   // ── Host starts the game ─────────────────────────────────
-  async function startGame(playerSetups) {
+  // gsMapping: { firebaseSlot: gsPlayerIndex, ... }
+  async function startGame(playerSetups, gsMapping) {
     if (!_isHost) return;
+
+    // Record my own GS index
+    _myGsIndex = gsMapping ? (gsMapping[_myIndex] !== undefined ? gsMapping[_myIndex] : _myIndex) : _myIndex;
+
     GS.init(playerSetups);
     const rawState = GS.getState();
     await _db.ref(`rooms/${_roomId}`).update({
-      status: 'playing',
-      state:  _serialize(rawState),
+      status:    'playing',
+      state:     _serialize(rawState),
+      gsMapping: gsMapping || null,
     });
     _saveSession();
     _listenState();
@@ -178,8 +190,22 @@ var Multiplayer = (() => {
     if (!_db || !_roomId) return;
     _db.ref(`rooms/${_roomId}/status`).on('value', snap => {
       if (snap.val() === 'playing') {
-        _listenState();
-        if (_onGameStartCb) _onGameStartCb();
+        // Fetch gsMapping so we know our GS player index
+        _db.ref(`rooms/${_roomId}/gsMapping`).get().then(mapSnap => {
+          const gsMapping = mapSnap.val();
+          if (gsMapping && gsMapping[_myIndex] !== undefined) {
+            _myGsIndex = gsMapping[_myIndex];
+          } else {
+            _myGsIndex = _myIndex;
+          }
+          _saveSession();
+          _listenState();
+          if (_onGameStartCb) _onGameStartCb();
+        }).catch(() => {
+          _myGsIndex = _myIndex;
+          _listenState();
+          if (_onGameStartCb) _onGameStartCb();
+        });
       }
     });
   }
@@ -203,9 +229,6 @@ var Multiplayer = (() => {
   }
 
   // ── Serialize / deserialize ───────────────────────────────
-  // Firebase stores arrays as objects with numeric keys when there are gaps.
-  // We must convert them back.
-
   function _ensureArray(val) {
     if (!val) return [];
     if (Array.isArray(val)) return val;
@@ -214,7 +237,6 @@ var Multiplayer = (() => {
   }
 
   function _serialize(state) {
-    // Strip undefined values which Firebase rejects
     return JSON.parse(JSON.stringify(state));
   }
 
@@ -264,7 +286,6 @@ var Multiplayer = (() => {
     clearSession: _clearSession,
     createRoom,
     joinRoom,
-    setMyCharacter,
     onPlayersChanged,
     onGameStart,
     startGame,

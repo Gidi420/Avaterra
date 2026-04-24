@@ -39,7 +39,7 @@ const UI = (() => {
     GS.on('combat_update',         _onCombatUpdate);
     GS.on('combat_end',            _onCombatEnd);
     GS.on('counter_choice_prompt', _onCounterChoice);
-    GS.on('log',                   _appendLog);
+    GS.on('log',                   () => _renderFullLog());  // re-render log on any new entry
     GS.on('error',                 msg => _toast(msg, 'error'));
     GS.on('game_over',             _onGameOver);
     GS.on('round_changed',         _onRoundChanged);
@@ -173,6 +173,12 @@ const UI = (() => {
       container.appendChild(onlineBtn);
 
       _buildMpLobby(container);
+      // Deep-link: auto-open lobby when ?room= param is in the URL
+      const urlRoomParam = new URLSearchParams(location.search).get('room');
+      if (urlRoomParam) {
+        const lobby = $('mp-lobby');
+        if (lobby) lobby.classList.remove('hidden');
+      }
     } else if (window.Multiplayer) {
       const cfg = document.createElement('p');
       cfg.style.cssText = 'color:#555;font-size:11px;text-align:center;margin-top:16px;';
@@ -1526,31 +1532,41 @@ const UI = (() => {
   }
 
   function _appendLog(msg) {
+    // Log entries are pushed to state.log by GameState.emit; rendered via _renderFullLog
+    _renderFullLog();
+  }
+
+  function _renderFullLog() {
     const el = $('game-log');
-    if (!el) return;
     const s  = GS.getState();
-    const entry = document.createElement('div');
-    entry.className = 'log-entry';
-    if (s) {
-      const cp = GS.currentPlayer();
-      const char = cp ? CHARACTERS.find(c => c.id === cp.characterId) : null;
-      const color = char ? char.color : '#888';
-      entry.innerHTML =
-        `<span class="log-prefix" style="color:#555">[R${s.round}]</span> ` +
-        `<span class="log-actor" style="color:${color}">${msg}`;
-    } else {
-      entry.textContent = msg;
+    if (!el || !s || !s.log) return;
+    const entries = s.log;  // newest-last array
+    el.innerHTML = '';
+    // Render newest first
+    for (let i = entries.length - 1; i >= 0; i--) {
+      const e = entries[i];
+      const msg = typeof e === 'string' ? e : (e.msg || '');
+      const round = typeof e === 'object' ? (e.round || '') : '';
+      const div = document.createElement('div');
+      div.className = 'log-entry';
+      div.innerHTML = round
+        ? `<span class="log-prefix">[R${round}]</span> ${msg}`
+        : msg;
+      el.appendChild(div);
     }
-    el.insertBefore(entry, el.firstChild);
-    // Keep log to 80 entries
-    while (el.children.length > 80) el.removeChild(el.lastChild);
   }
 
   // ── State change handler ──────────────────────────────────
   function _onStateChanged() {
+    const s = GS.getState();
     _updateHUD();
     _updateActionButtons();
     _updateSpectatorBar();
+    _renderFullLog();
+    // Close stale combat overlay when combat ends (received via remote state)
+    if (s && !s.combat && s.subphase === 'action_select' && !s.pendingAction) {
+      hide('combat-overlay');
+    }
   }
 
   function _updateSpectatorBar() {
@@ -1722,84 +1738,38 @@ const UI = (() => {
         onclick="this.select()">
     `;
 
-    // ── Character picker for MY slot ──────────────────────────
-    let _takenByOthers = new Set();
-
-    function _renderCharPicker() {
-      const picker = $('mp-char-picker');
-      if (!picker) return;
-      picker.innerHTML = `
-        <div style="font-size:12px;color:#aaa;margin-bottom:5px;">🎭 Your Character:</div>
-        <select id="mp-my-char" onchange="UI._mpPickChar()"
-          style="width:100%;background:#1a1a3a;border:1px solid #3a3a6a;color:#ccc;border-radius:4px;padding:5px 8px;margin-bottom:5px;">
-          ${CHARACTERS.map(c => {
-            const locked = _takenByOthers.has(c.id);
-            return `<option value="${c.id}" ${locked ? 'disabled' : ''} style="${locked ? 'color:#444' : ''}">
-              ${locked ? '🔒 ' : ''}${c.name} — ${c.lore}</option>`;
-          }).join('')}
-        </select>`;
-      // Auto-select first available character
-      const sel = $('mp-my-char');
-      if (sel) {
-        const available = CHARACTERS.find(c => !_takenByOthers.has(c.id));
-        if (available && _takenByOthers.has(sel.value)) sel.value = available.id;
-        // Auto-save selection
-        setTimeout(() => UI._mpPickChar(), 50);
-      }
-    }
-
-    _renderCharPicker();
-
     // ── Firebase player listener ───────────────────────────
     Multiplayer.onPlayersChanged((players) => {
-      // Collect chars taken by others
-      const taken = new Set();
-      Object.entries(players).forEach(([idx, p]) => {
-        if (parseInt(idx) !== mySlot && p.characterId) taken.add(p.characterId);
-      });
-      const changed = taken.size !== _takenByOthers.size ||
-        [...taken].some(c => !_takenByOthers.has(c));
-      _takenByOthers = taken;
-
-      // Re-render char picker if taken set changed (and my char now conflicts)
-      const mySel = $('mp-my-char');
-      if (mySel && taken.has(mySel.value)) {
-        _renderCharPicker();
-      } else if (changed) {
-        _renderCharPicker();
-      }
+      // Info line: chars assigned randomly at start
+      const picker = $('mp-char-picker');
+      if (picker) picker.innerHTML = `<p style="color:#777;font-size:11px;text-align:center;margin:0;">
+        🎲 Characters &amp; turn order are randomly assigned when the host starts.</p>`;
 
       // Render player slots
       const slots = $('mp-player-slots');
       if (!slots) return;
       slots.innerHTML = '';
       Object.entries(players).sort(([a],[b])=>parseInt(a)-parseInt(b)).forEach(([idx, p]) => {
-        const char = p.characterId ? CHARACTERS.find(c => c.id === p.characterId) : null;
-        const me   = parseInt(idx) === mySlot;
+        const me = parseInt(idx) === mySlot;
         slots.innerHTML += `<div style="padding:5px 8px;border-radius:4px;margin:3px 0;
           background:${me?'#1a2a4a':'#111120'};border:1px solid ${me?'#3355aa':'#2a2a4a'};
-          font-size:13px;color:${char?char.color:'#ccc'}">
-          ${me ? '▶ ' : ''}${p.name}${char ? ` — <b>${char.name}</b>` : ' — <em style="color:#555">choosing…</em>'}
+          font-size:13px;color:#ccc">
+          ${me ? '▶ ' : ''}${p.name}
           ${me ? ' <span style="color:#666;font-size:11px">(you)</span>' : ''}
         </div>`;
       });
 
-      // Start button logic (host only)
-      const filled    = Object.keys(players).length;
-      const allChars  = Object.values(players).every(p => !!p.characterId);
-      const startBtn  = $('mp-start-btn');
-      const waitMsg   = $('mp-waiting-msg');
+      // Start button logic (host only — enabled when all slots filled)
+      const filled   = Object.keys(players).length;
+      const startBtn = $('mp-start-btn');
+      const waitMsg  = $('mp-waiting-msg');
       if (isHost && playerCount) {
-        const allReady = filled >= playerCount && allChars;
-        if (startBtn) startBtn.style.display = allReady ? 'block' : 'none';
-        if (waitMsg)  waitMsg.textContent =
-          allReady                   ? 'All players ready — start when you like!' :
-          filled >= playerCount      ? `Waiting for characters… (${Object.values(players).filter(p=>p.characterId).length}/${filled} chosen)` :
-                                       `Waiting for players… (${filled}/${playerCount} joined)`;
+        if (startBtn) startBtn.style.display = filled >= playerCount ? 'block' : 'none';
+        if (waitMsg)  waitMsg.textContent = filled >= playerCount
+          ? 'All players joined — start when ready!'
+          : `Waiting for players… (${filled}/${playerCount} joined)`;
       } else if (waitMsg) {
-        waitMsg.textContent = allChars
-          ? 'Character locked in — waiting for the host to start…'
-          : 'Choose your character above, then wait for the host…';
+        waitMsg.textContent = 'Waiting for the host to start the game…';
       }
     });
 
@@ -1813,37 +1783,28 @@ const UI = (() => {
     }
   }
 
-  function _mpPickChar() {
-    const sel = $('mp-my-char');
-    if (!sel || !sel.value) return;
-    Multiplayer.setMyCharacter(sel.value).catch(e =>
-      _toast('Failed to set character: ' + e.message, 'error'));
-  }
+  function _mpPickChar() { /* no-op — characters are assigned automatically */ }
 
   async function _mpStartGame() {
     try {
       const snap = await firebase.database().ref(`rooms/${Multiplayer.getRoomId()}/players`).get();
       const players = snap.val() || {};
 
-      // Validate all players have chosen a character
-      const missing = Object.values(players).filter(p => !p.characterId);
-      if (missing.length > 0) {
-        _toast(`${missing.map(p=>p.name).join(', ')} still need to choose a character!`, 'error');
-        return;
-      }
+      // Shuffle player slots → randomises turn order AND who gets which character
+      const slots = Object.entries(players).sort(([a],[b]) => parseInt(a) - parseInt(b));
+      const shuffledSlots = [...slots].sort(() => Math.random() - 0.5);
 
-      // Check no duplicate characters
-      const charIds = Object.values(players).map(p => p.characterId);
-      const dupes = charIds.filter((c, i) => charIds.indexOf(c) !== i);
-      if (dupes.length > 0) {
-        _toast('Duplicate characters detected! Everyone must pick a unique character.', 'error');
-        return;
-      }
+      // Assign unique random characters
+      const charPool = [...CHARACTERS].sort(() => Math.random() - 0.5);
 
-      const playerSetups = Object.entries(players)
-        .sort(([a],[b]) => parseInt(a) - parseInt(b))
-        .map(([,p]) => ({ name: p.name, characterId: p.characterId }));
-      await Multiplayer.startGame(playerSetups);
+      // Build gsMapping: Firebase slot → GS player index
+      const gsMapping = {};
+      const playerSetups = shuffledSlots.map(([slot, p], gsIdx) => {
+        gsMapping[parseInt(slot)] = gsIdx;
+        return { name: p.name, characterId: charPool[gsIdx].id };
+      });
+
+      await Multiplayer.startGame(playerSetups, gsMapping);
     } catch (e) {
       _toast('Failed to start game: ' + e.message, 'error');
       console.error('[_mpStartGame]', e);

@@ -11,7 +11,14 @@ const GS = (() => {
 
   // ── Event bus ─────────────────────────────────────────────
   function on(event, fn)  { (listeners[event] = listeners[event] || []).push(fn); }
-  function emit(event, data) { (listeners[event] || []).forEach(fn => fn(data)); }
+  function emit(event, data) {
+    // Auto-sync log entries into state.log so Firebase carries them to all clients
+    if (event === 'log' && state) {
+      const entry = { msg: data, round: state.round };
+      state.log = [...(state.log || []).slice(-79), entry];
+    }
+    (listeners[event] || []).forEach(fn => fn(data));
+  }
 
   // ── Accessors ─────────────────────────────────────────────
   function getState()  { return state; }
@@ -1545,6 +1552,9 @@ const GS = (() => {
     }
     if (state.combat) {
       emit('combat_update', state.combat);
+    } else if (state.subphase === 'action_select') {
+      // No active combat → signal UI to close any stale combat overlay
+      emit('phase_changed', { subphase: 'action_select' });
     }
     if (state.phase === 'gameover') {
       const winner = state.players.find(p => p.alive);
