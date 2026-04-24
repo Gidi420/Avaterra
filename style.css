@@ -218,8 +218,7 @@ html, body {
 /* ── Game log ────────────────────────────────────────────── */
 #game-log {
   overflow-y: auto;
-  flex: 1;
-  max-height: 180px;
+  max-height: 160px;
 }
 
 .log-entry {
@@ -227,9 +226,25 @@ html, body {
   color: var(--text-dim);
   padding: 2px 0;
   border-bottom: 1px solid #14142e;
-  line-height: 1.4;
+  line-height: 1.5;
 }
 .log-entry:first-child { color: var(--text); }
+.log-prefix { font-size: 10px; opacity: 0.6; }
+
+/* ── Multiplayer spectator bar ───────────────────────────── */
+#mp-spectator-bar {
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  background: rgba(10,10,30,0.92);
+  border-bottom: 1px solid var(--accent);
+  padding: 6px 16px;
+  font-size: 12px;
+  color: var(--text-dim);
+  text-align: center;
+  z-index: 200;
+  pointer-events: none;
+}
+#mp-spectator-bar b { color: var(--accent); }
 
 /* ── Tile tooltip ────────────────────────────────────────── */
 #tile-tooltip {

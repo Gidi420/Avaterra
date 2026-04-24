@@ -58,8 +58,45 @@ var Multiplayer = (() => {
     return Math.random().toString(36).slice(2, 8).toUpperCase();
   }
 
+  // ── Session persistence (survives page refresh) ───────────
+  function _saveSession() {
+    if (!_roomId) return;
+    try {
+      sessionStorage.setItem('mp_session', JSON.stringify({
+        roomId: _roomId, myIndex: _myIndex, isHost: _isHost,
+      }));
+    } catch(e) {}
+  }
+
+  function _clearSession() {
+    try { sessionStorage.removeItem('mp_session'); } catch(e) {}
+  }
+
+  function getSavedSession() {
+    try { return JSON.parse(sessionStorage.getItem('mp_session')); } catch { return null; }
+  }
+
+  async function rejoinRoom() {
+    const session = getSavedSession();
+    if (!session || !session.roomId) return false;
+    if (!_init()) return false;
+    try {
+      const snap = await _db.ref(`rooms/${session.roomId}/status`).get();
+      if (!snap.exists() || snap.val() !== 'playing') { _clearSession(); return false; }
+      _roomId  = session.roomId;
+      _myIndex = session.myIndex;
+      _isHost  = session.isHost;
+      _listenState();
+      return true;
+    } catch(e) {
+      console.warn('[Multiplayer] rejoinRoom failed:', e);
+      _clearSession();
+      return false;
+    }
+  }
+
   // ── Create room ───────────────────────────────────────────
-  async function createRoom(playerCount, myName, myCharId) {
+  async function createRoom(playerCount, myName) {
     if (!_init()) throw new Error('Firebase not configured — fill in firebase-config.js');
     _roomId  = _genCode();
     _myIndex = 0;
@@ -70,15 +107,16 @@ var Multiplayer = (() => {
       hostIndex:   0,
       playerCount,
       status:      'waiting',
-      players:     { 0: { name: myName, characterId: myCharId } },
+      players:     { 0: { name: myName } },
     });
 
     _listenPlayers();
+    _saveSession();
     return _roomId;
   }
 
   // ── Join room ─────────────────────────────────────────────
-  async function joinRoom(roomId, myName, myCharId) {
+  async function joinRoom(roomId, myName) {
     if (!_init()) throw new Error('Firebase not configured — fill in firebase-config.js');
 
     const snap = await _db.ref(`rooms/${roomId}`).get();
@@ -96,9 +134,20 @@ var Multiplayer = (() => {
     _myIndex = slot;
     _isHost  = false;
 
-    await _db.ref(`rooms/${_roomId}/players/${slot}`).set({ name: myName, characterId: myCharId });
+    await _db.ref(`rooms/${_roomId}/players/${slot}`).set({ name: myName });
     _listenPlayers();
+    _saveSession();
     return slot;
+  }
+
+  // ── Set character for my slot ─────────────────────────────
+  async function setMyCharacter(charId) {
+    if (!_db || !_roomId) return;
+    if (charId === null) {
+      await _db.ref(`rooms/${_roomId}/players/${_myIndex}/characterId`).remove();
+    } else {
+      await _db.ref(`rooms/${_roomId}/players/${_myIndex}/characterId`).set(charId);
+    }
   }
 
   // ── Listen for player list changes ───────────────────────
@@ -119,6 +168,7 @@ var Multiplayer = (() => {
       status: 'playing',
       state:  _serialize(rawState),
     });
+    _saveSession();
     _listenState();
   }
 
@@ -209,8 +259,12 @@ var Multiplayer = (() => {
     getMyIndex,
     getRoomId,
     getInviteUrl,
+    getSavedSession,
+    rejoinRoom,
+    clearSession: _clearSession,
     createRoom,
     joinRoom,
+    setMyCharacter,
     onPlayersChanged,
     onGameStart,
     startGame,

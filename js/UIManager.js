@@ -13,10 +13,21 @@ const UI = (() => {
   let _pendingPlayerClick = null;
   let _charSelectDefaults = null;
 
+  // ── Multiplayer gating helpers ────────────────────────────
+  // Returns true if the current-turn event should show UI to me
+  function _isMyTurnEvent() {
+    if (!window.Multiplayer || !Multiplayer.isActive()) return true;
+    return Multiplayer.isMyTurn();
+  }
+  // Returns true if a specific-player event should show UI to me
+  function _isMyPlayerEvent(playerIndex) {
+    if (!window.Multiplayer || !Multiplayer.isActive()) return true;
+    return Multiplayer.isMyPlayer(playerIndex);
+  }
+
   // ── Init ──────────────────────────────────────────────────
-  function init() {
-    _buildCharSelectScreen();
-    // Sync state to Firebase whenever it changes (multiplayer)
+  async function init() {
+    // Set up all GS event listeners first (synchronous)
     GS.on('state_changed', s => {
       if (window.Multiplayer && Multiplayer.isActive() && !Multiplayer.isApplyingRemote()) {
         Multiplayer.pushState(s);
@@ -54,6 +65,28 @@ const UI = (() => {
     GS.on('rotate_tile_pick_prompt', _onRotateTilePickPrompt);
     GS.on('shadow_plunder_reveal',   _onShadowPlunderReveal);
     GS.on('phantom_bolt_prompt',     _onPhantomBoltPrompt);
+
+    // Check for saved multiplayer session (page refresh rejoin)
+    if (window.Multiplayer && Multiplayer.getSavedSession()) {
+      const contentEl = $('char-select-content');
+      show('char-select');
+      if (contentEl) contentEl.innerHTML =
+        '<div style="text-align:center;padding:48px 24px;color:#aaa;font-size:15px;">🔄 Reconnecting to your game…</div>';
+      try {
+        const rejoined = await Multiplayer.rejoinRoom();
+        if (rejoined) {
+          hide('char-select');
+          show('right-panel');
+          _buildHUD();
+          _toast('Reconnected to your game!', 'info');
+          return;
+        }
+      } catch(e) {
+        console.warn('[UI] Rejoin failed:', e);
+      }
+    }
+
+    _buildCharSelectScreen();
   }
 
   // ══════════════════════════════════════════════════════════
@@ -158,7 +191,6 @@ const UI = (() => {
     lobby.className = 'hidden';
     lobby.style.cssText = 'background:#0d0d22;border:1px solid #3a3a6a;border-radius:8px;padding:16px;margin-top:10px;';
 
-    // Check for ?room= URL param (auto-fill join code)
     const urlRoom = new URLSearchParams(location.search).get('room');
 
     lobby.innerHTML = `
@@ -171,18 +203,14 @@ const UI = (() => {
 
       <!-- CREATE pane -->
       <div id="mp-create-pane" style="display:${urlRoom?'none':'block'}">
-        <p style="color:#aaa;font-size:12px;margin-bottom:8px;">Pick your player count, enter your name and character above, then create a room.</p>
         <label style="color:#888;font-size:12px;">Your name:</label>
         <input id="mp-host-name" type="text" placeholder="Your name" value="Host"
           style="width:100%;background:#1a1a3a;border:1px solid #3a3a6a;color:#ccc;border-radius:4px;padding:5px 8px;margin:4px 0 8px;">
-        <label style="color:#888;font-size:12px;">Your character:</label>
-        <select id="mp-host-char" style="width:100%;background:#1a1a3a;border:1px solid #3a3a6a;color:#ccc;border-radius:4px;padding:5px 8px;margin:4px 0 8px;">
-          ${CHARACTERS.map(c => `<option value="${c.id}">${c.name} — ${c.lore}</option>`).join('')}
-        </select>
         <label style="color:#888;font-size:12px;">Number of players:</label>
         <select id="mp-player-count" style="width:100%;background:#1a1a3a;border:1px solid #3a3a6a;color:#ccc;border-radius:4px;padding:5px 8px;margin:4px 0 8px;">
           ${[2,3,4,5,6].map(n=>`<option value="${n}">${n} Players</option>`).join('')}
         </select>
+        <p style="color:#888;font-size:11px;margin-bottom:8px;">💡 Characters are chosen in the lobby after all players join.</p>
         <button class="btn btn-primary big-btn" style="margin-top:6px;"
           onclick="UI._mpCreateRoom()">Create Room</button>
       </div>
@@ -192,22 +220,20 @@ const UI = (() => {
         <label style="color:#888;font-size:12px;">Your name:</label>
         <input id="mp-join-name" type="text" placeholder="Your name" value="Player"
           style="width:100%;background:#1a1a3a;border:1px solid #3a3a6a;color:#ccc;border-radius:4px;padding:5px 8px;margin:4px 0 8px;">
-        <label style="color:#888;font-size:12px;">Your character:</label>
-        <select id="mp-join-char" style="width:100%;background:#1a1a3a;border:1px solid #3a3a6a;color:#ccc;border-radius:4px;padding:5px 8px;margin:4px 0 8px;">
-          ${CHARACTERS.map(c => `<option value="${c.id}">${c.name} — ${c.lore}</option>`).join('')}
-        </select>
         <label style="color:#888;font-size:12px;">Room Code:</label>
         <input id="mp-room-code" type="text" placeholder="6-char code" maxlength="6"
           style="width:100%;background:#1a1a3a;border:1px solid #3a3a6a;color:#ccc;border-radius:4px;padding:5px 8px;margin:4px 0 8px;text-transform:uppercase;"
           value="${urlRoom || ''}">
+        <p style="color:#888;font-size:11px;margin-bottom:8px;">💡 Characters are chosen in the lobby after joining.</p>
         <button class="btn btn-primary big-btn" style="margin-top:6px;"
           onclick="UI._mpJoinRoom()">Join Room</button>
       </div>
 
       <!-- WAITING room (shown after create/join) -->
       <div id="mp-waiting" style="display:none">
-        <div id="mp-room-info" style="text-align:center;margin-bottom:12px;"></div>
-        <div id="mp-player-slots"></div>
+        <div id="mp-room-info" style="text-align:center;margin-bottom:10px;"></div>
+        <div id="mp-char-picker" style="margin-bottom:10px;"></div>
+        <div id="mp-player-slots" style="margin-bottom:8px;"></div>
         <button id="mp-start-btn" class="btn btn-primary big-btn" style="display:none;margin-top:10px;"
           onclick="UI._mpStartGame()">▶ Start Game</button>
         <p id="mp-waiting-msg" style="color:#888;font-size:12px;text-align:center;margin-top:8px;"></p>
@@ -387,10 +413,13 @@ const UI = (() => {
   }
 
   function _renderCurrentHand() {
-    const p  = GS.currentPlayer();
-    const el = $('hand-display');
-    if (!el) return;
-    el.innerHTML = '<div class="hand-label">Combat Hand:</div>';
+    // In multiplayer, always show MY player's hand (not the current turn player's)
+    const isMP = window.Multiplayer && Multiplayer.isActive();
+    const p    = isMP ? GS.getPlayer(Multiplayer.getMyIndex()) : GS.currentPlayer();
+    const el   = $('hand-display');
+    if (!el || !p) return;
+    const label = isMP ? `Your Combat Hand (${p.name}):` : 'Combat Hand:';
+    el.innerHTML = `<div class="hand-label">${label}</div>`;
     if (p.combatCards.length === 0) {
       el.innerHTML += '<span class="empty-hand">— empty —</span>';
       return;
@@ -405,10 +434,13 @@ const UI = (() => {
   }
 
   function _renderCurrentInventory() {
-    const p  = GS.currentPlayer();
-    const el = $('inventory-display');
-    if (!el) return;
-    el.innerHTML = '<div class="inv-label">Inventory:</div>';
+    // In multiplayer, always show MY player's inventory
+    const isMP = window.Multiplayer && Multiplayer.isActive();
+    const p    = isMP ? GS.getPlayer(Multiplayer.getMyIndex()) : GS.currentPlayer();
+    const el   = $('inventory-display');
+    if (!el || !p) return;
+    const label = isMP ? `Your Inventory (${p.name}):` : 'Inventory:';
+    el.innerHTML = `<div class="inv-label">${label}</div>`;
     if (p.items.length === 0) {
       el.innerHTML += '<span class="empty-inv">— empty —</span>';
       return;
@@ -668,6 +700,7 @@ const UI = (() => {
   }
 
   function _onCounterChoice({ defenderId }) {
+    if (!_isMyPlayerEvent(defenderId)) return;
     const def = GS.getPlayer(defenderId);
     _showModal(`${def.name}: Block or Counter?`, `
       <p>You successfully blocked! Choose your response:</p>
@@ -808,15 +841,35 @@ const UI = (() => {
     el.classList.remove('hidden');
 
     if (combat.phase === 'attacker_select') {
-      _buildCardSelector(atk,
-        `Round ${combat.round}/3 — <b>${atk.name}</b> hunts a Monster<br><small>Different card = win; Same = monster counters</small>`,
-        uid => GS.selectCombatCard(atk.id, uid));
+      // Gate: only show card picker to the hunter; others see waiting screen
+      _buildPassDeviceScreen(atk.name, 'pick your combat card', () => {
+        _buildCardSelector(atk,
+          `Round ${combat.round}/3 — <b>${atk.name}</b> hunts a Monster<br><small>Different card = win; Same = monster counters</small>`,
+          uid => GS.selectCombatCard(atk.id, uid));
+      });
     } else if (combat.phase === 'monster_roll') {
+      const iAmAttacker = _isMyPlayerEvent(atk.id);
+      const isMP = window.Multiplayer && Multiplayer.isActive();
+
+      // In multiplayer: non-attacker clients show waiting screen
+      if (isMP && !iAmAttacker) {
+        const box = document.createElement('div');
+        box.className = 'combat-box pass-device';
+        box.innerHTML = `
+          <div class="pass-icon">⏳</div>
+          <div class="pass-title">Waiting for</div>
+          <div class="pass-name">${atk.name}</div>
+          <div class="pass-action">to roll the monster die…</div>`;
+        el.appendChild(box);
+        return;
+      }
+
+      // Attacker's client (or hotseat) — show roll UI
       const box = document.createElement('div');
       box.className = 'combat-box';
       box.innerHTML = `
         <div class="combat-title">Roll Monster Die</div>
-        <p>Another player rolls for the monster…</p>
+        <p>${isMP ? 'Roll to see what the monster plays!' : 'Another player rolls for the monster…'}</p>
         <div id="roulette-display" class="roulette-die">🎲</div>`;
       const rollBtn = document.createElement('button');
       rollBtn.className = 'btn btn-primary big-btn';
@@ -1075,6 +1128,7 @@ const UI = (() => {
   }
 
   function _onTowerPrompt({ tileId, towerUsed, rotatableTileIds }) {
+    if (!_isMyTurnEvent()) return;
     const rotateBtn = (rotatableTileIds && rotatableTileIds.length > 0)
       ? { label: '🔄 Rotate Nearby Tile (1 AP)', cls: 'btn-primary', onclick: () => {
           _closeModal();
@@ -1093,6 +1147,7 @@ const UI = (() => {
   }
 
   function _onCaveDiscardPrompt({ playerId, hand }) {
+    if (!_isMyPlayerEvent(playerId)) return;
     const p = GS.getPlayer(playerId);
     let html = `<p><b>${p.name}</b> enters the Cave! Discard 1 Combat Card of your choice:</p><div class="hand-reveal">`;
     hand.forEach(card => {
@@ -1105,6 +1160,7 @@ const UI = (() => {
   }
 
   function _onVandalismPrompt({ attackerId, defenderId, items }) {
+    if (!_isMyPlayerEvent(attackerId)) return;
     const atk = GS.getPlayer(attackerId);
     const def = GS.getPlayer(defenderId);
     let html = `<p><b>${atk.name}</b> uses Vandalism on <b>${def.name}</b>!</p>
@@ -1127,6 +1183,7 @@ const UI = (() => {
   }
 
   function _onSanguinePrompt({ attackerId, defenderId, actionsLeft }) {
+    if (!_isMyPlayerEvent(attackerId)) return;
     const atk = GS.getPlayer(attackerId);
     _showModal(`🩸 Sanguine Ritual?`, `
       <p><b>${atk.name}</b> is about to attack!</p>
@@ -1139,6 +1196,7 @@ const UI = (() => {
   }
 
   function _onRotateTilePickPrompt({ playerId, tileIds }) {
+    if (!_isMyPlayerEvent(playerId)) return;
     let html = '<p>Choose a tile to rotate:</p><div class="tile-grid">';
     tileIds.forEach(id => {
       const t  = GS.getTile(id);
@@ -1152,6 +1210,7 @@ const UI = (() => {
   }
 
   function _onMindDrainPrompt({ attackerId, defenderId }) {
+    if (!_isMyPlayerEvent(attackerId)) return;
     const atk = GS.getPlayer(attackerId);
     const def = GS.getPlayer(defenderId);
     let html = `<p><b>${atk.name}</b> uses Disarm on <b>${def.name}</b>!</p>
@@ -1169,6 +1228,7 @@ const UI = (() => {
   }
 
   function _onRotatePrompt({ playerId }) {
+    if (!_isMyPlayerEvent(playerId)) return;
     const p    = GS.getPlayer(playerId);
     const tile = GS.getTile(p.tileId);
     if (!tile || !tile.hasWalls) { _toast('No walled tile here to rotate.', 'error'); return; }
@@ -1199,6 +1259,7 @@ const UI = (() => {
   }
 
   function _onWorldShaper({ tiles }) {
+    if (!_isMyTurnEvent()) return;
     const activeTiles   = tiles.filter(t => !t.removed);
     const removedTiles  = tiles.filter(t => t.removed);
     let html = '<p>Choose action:</p><div class="tile-picker">';
@@ -1221,6 +1282,7 @@ const UI = (() => {
   }
 
   function _onSalvage({ discard }) {
+    if (!_isMyTurnEvent()) return;
     let html = '<p>Choose a Bronze item from the discard pile:</p><div class="item-grid">';
     discard.forEach(item => {
       html += `<button class="item-btn tier-bronze" onclick="GS.resolveSalvage(${item.uid}); UI._closeModal();">${item.icon} ${item.name}</button>`;
@@ -1230,6 +1292,7 @@ const UI = (() => {
   }
 
   function _onRangedAttack({ attackerId, targets }) {
+    if (!_isMyPlayerEvent(attackerId)) return;
     _showPlayerPicker('Phantom Strike — Choose target', targets.map(id => GS.getPlayer(id)), targetId => {
       // Initiate seeking-arrow-style combat via item
       const atk = GS.getPlayer(attackerId);
@@ -1239,6 +1302,7 @@ const UI = (() => {
   }
 
   function _onBlinkStrike({ attackerId, targets }) {
+    if (!_isMyPlayerEvent(attackerId)) return;
     _showPlayerPicker('Blink Strike — Choose target', targets.map(id => GS.getPlayer(id)), targetId => {
       GS.commitSeekingArrow(targetId);
       _closeModal();
@@ -1246,6 +1310,7 @@ const UI = (() => {
   }
 
   function _onPhantomBoltPrompt({ attackerId, targets }) {
+    if (!_isMyPlayerEvent(attackerId)) return;
     const atk      = GS.getPlayer(attackerId);
     const selected = [];
     function rebuild() {
@@ -1463,18 +1528,45 @@ const UI = (() => {
   function _appendLog(msg) {
     const el = $('game-log');
     if (!el) return;
+    const s  = GS.getState();
     const entry = document.createElement('div');
     entry.className = 'log-entry';
-    entry.textContent = msg;
+    if (s) {
+      const cp = GS.currentPlayer();
+      const char = cp ? CHARACTERS.find(c => c.id === cp.characterId) : null;
+      const color = char ? char.color : '#888';
+      entry.innerHTML =
+        `<span class="log-prefix" style="color:#555">[R${s.round}]</span> ` +
+        `<span class="log-actor" style="color:${color}">${msg}`;
+    } else {
+      entry.textContent = msg;
+    }
     el.insertBefore(entry, el.firstChild);
-    // Keep log to 50 entries
-    while (el.children.length > 50) el.removeChild(el.lastChild);
+    // Keep log to 80 entries
+    while (el.children.length > 80) el.removeChild(el.lastChild);
   }
 
   // ── State change handler ──────────────────────────────────
   function _onStateChanged() {
     _updateHUD();
     _updateActionButtons();
+    _updateSpectatorBar();
+  }
+
+  function _updateSpectatorBar() {
+    const bar = $('mp-spectator-bar');
+    if (!bar) return;
+    if (!window.Multiplayer || !Multiplayer.isActive()) { bar.style.display = 'none'; return; }
+    const s  = GS.getState();
+    if (!s) { bar.style.display = 'none'; return; }
+    const cp   = GS.currentPlayer();
+    const char = cp ? CHARACTERS.find(c => c.id === cp.characterId) : null;
+    if (Multiplayer.isMyTurn()) {
+      bar.style.display = 'none';
+    } else {
+      bar.style.display = 'block';
+      bar.innerHTML = `⏳ Waiting for <b style="color:${char?char.color:'#fff'}">${cp ? cp.name : '?'}</b> to take their turn…`;
+    }
   }
 
   function _onPhaseChanged({ subphase }) {
@@ -1595,11 +1687,10 @@ const UI = (() => {
   }
 
   async function _mpCreateRoom() {
-    const name    = ($('mp-host-name').value || 'Host').trim();
-    const charId  = $('mp-host-char').value;
-    const count   = parseInt($('mp-player-count').value);
+    const name  = ($('mp-host-name').value || 'Host').trim();
+    const count = parseInt($('mp-player-count').value);
     try {
-      const roomId = await Multiplayer.createRoom(count, name, charId);
+      const roomId = await Multiplayer.createRoom(count, name);
       _mpShowWaiting(roomId, 0, count, true);
     } catch (e) {
       _toast(e.message, 'error');
@@ -1607,12 +1698,11 @@ const UI = (() => {
   }
 
   async function _mpJoinRoom() {
-    const name   = ($('mp-join-name').value || 'Player').trim();
-    const charId = $('mp-join-char').value;
-    const code   = ($('mp-room-code').value || '').toUpperCase().trim();
+    const name = ($('mp-join-name').value || 'Player').trim();
+    const code = ($('mp-room-code').value || '').toUpperCase().trim();
     if (!code) { _toast('Enter a room code.', 'error'); return; }
     try {
-      const slot = await Multiplayer.joinRoom(code, name, charId);
+      const slot = await Multiplayer.joinRoom(code, name);
       _mpShowWaiting(code, slot, null, false);
     } catch (e) {
       _toast(e.message, 'error');
@@ -1620,7 +1710,6 @@ const UI = (() => {
   }
 
   function _mpShowWaiting(roomId, mySlot, playerCount, isHost) {
-    // Hide create/join panes, show waiting
     $('mp-create-pane').style.display = 'none';
     $('mp-join-pane').style.display   = 'none';
     $('mp-waiting').style.display     = 'block';
@@ -1628,39 +1717,89 @@ const UI = (() => {
     const inviteUrl = Multiplayer.getInviteUrl();
     $('mp-room-info').innerHTML = `
       <div style="font-size:22px;font-weight:bold;letter-spacing:4px;color:#aaddff">${roomId}</div>
-      <div style="font-size:11px;color:#666;margin-top:4px;">Share this link with others:</div>
+      <div style="font-size:11px;color:#666;margin-top:4px;">Share this link:</div>
       <input readonly value="${inviteUrl}" style="width:100%;background:#0a0a1a;border:1px solid #3a3a6a;color:#88aaff;border-radius:4px;padding:4px 8px;font-size:11px;margin-top:4px;"
         onclick="this.select()">
     `;
 
-    // Listen for player changes
+    // ── Character picker for MY slot ──────────────────────────
+    let _takenByOthers = new Set();
+
+    function _renderCharPicker() {
+      const picker = $('mp-char-picker');
+      if (!picker) return;
+      picker.innerHTML = `
+        <div style="font-size:12px;color:#aaa;margin-bottom:5px;">🎭 Your Character:</div>
+        <select id="mp-my-char" onchange="UI._mpPickChar()"
+          style="width:100%;background:#1a1a3a;border:1px solid #3a3a6a;color:#ccc;border-radius:4px;padding:5px 8px;margin-bottom:5px;">
+          ${CHARACTERS.map(c => {
+            const locked = _takenByOthers.has(c.id);
+            return `<option value="${c.id}" ${locked ? 'disabled' : ''} style="${locked ? 'color:#444' : ''}">
+              ${locked ? '🔒 ' : ''}${c.name} — ${c.lore}</option>`;
+          }).join('')}
+        </select>`;
+      // Auto-select first available character
+      const sel = $('mp-my-char');
+      if (sel) {
+        const available = CHARACTERS.find(c => !_takenByOthers.has(c.id));
+        if (available && _takenByOthers.has(sel.value)) sel.value = available.id;
+        // Auto-save selection
+        setTimeout(() => UI._mpPickChar(), 50);
+      }
+    }
+
+    _renderCharPicker();
+
+    // ── Firebase player listener ───────────────────────────
     Multiplayer.onPlayersChanged((players) => {
+      // Collect chars taken by others
+      const taken = new Set();
+      Object.entries(players).forEach(([idx, p]) => {
+        if (parseInt(idx) !== mySlot && p.characterId) taken.add(p.characterId);
+      });
+      const changed = taken.size !== _takenByOthers.size ||
+        [...taken].some(c => !_takenByOthers.has(c));
+      _takenByOthers = taken;
+
+      // Re-render char picker if taken set changed (and my char now conflicts)
+      const mySel = $('mp-my-char');
+      if (mySel && taken.has(mySel.value)) {
+        _renderCharPicker();
+      } else if (changed) {
+        _renderCharPicker();
+      }
+
+      // Render player slots
       const slots = $('mp-player-slots');
       if (!slots) return;
       slots.innerHTML = '';
-      Object.entries(players).forEach(([idx, p]) => {
-        const char = CHARACTERS.find(c => c.id === p.characterId);
+      Object.entries(players).sort(([a],[b])=>parseInt(a)-parseInt(b)).forEach(([idx, p]) => {
+        const char = p.characterId ? CHARACTERS.find(c => c.id === p.characterId) : null;
         const me   = parseInt(idx) === mySlot;
         slots.innerHTML += `<div style="padding:5px 8px;border-radius:4px;margin:3px 0;
           background:${me?'#1a2a4a':'#111120'};border:1px solid ${me?'#3355aa':'#2a2a4a'};
           font-size:13px;color:${char?char.color:'#ccc'}">
-          ${me ? '▶ ' : ''}Player ${parseInt(idx)+1}: ${p.name} — ${char?char.name:p.characterId}
-          ${me ? '<span style="color:#666;font-size:11px"> (you)</span>' : ''}
+          ${me ? '▶ ' : ''}${p.name}${char ? ` — <b>${char.name}</b>` : ' — <em style="color:#555">choosing…</em>'}
+          ${me ? ' <span style="color:#666;font-size:11px">(you)</span>' : ''}
         </div>`;
       });
 
-      // Host: show start button when all slots filled
+      // Start button logic (host only)
+      const filled    = Object.keys(players).length;
+      const allChars  = Object.values(players).every(p => !!p.characterId);
+      const startBtn  = $('mp-start-btn');
+      const waitMsg   = $('mp-waiting-msg');
       if (isHost && playerCount) {
-        const filled  = Object.keys(players).length;
-        const startBtn = $('mp-start-btn');
-        const waitMsg  = $('mp-waiting-msg');
-        if (startBtn) startBtn.style.display = filled >= playerCount ? 'block' : 'none';
-        if (waitMsg)  waitMsg.textContent     = filled >= playerCount
-          ? 'All players have joined — you can start!'
-          : `Waiting for players… (${filled}/${playerCount} joined)`;
-      } else {
-        const waitMsg = $('mp-waiting-msg');
-        if (waitMsg) waitMsg.textContent = 'Waiting for the host to start the game…';
+        const allReady = filled >= playerCount && allChars;
+        if (startBtn) startBtn.style.display = allReady ? 'block' : 'none';
+        if (waitMsg)  waitMsg.textContent =
+          allReady                   ? 'All players ready — start when you like!' :
+          filled >= playerCount      ? `Waiting for characters… (${Object.values(players).filter(p=>p.characterId).length}/${filled} chosen)` :
+                                       `Waiting for players… (${filled}/${playerCount} joined)`;
+      } else if (waitMsg) {
+        waitMsg.textContent = allChars
+          ? 'Character locked in — waiting for the host to start…'
+          : 'Choose your character above, then wait for the host…';
       }
     });
 
@@ -1674,11 +1813,33 @@ const UI = (() => {
     }
   }
 
+  function _mpPickChar() {
+    const sel = $('mp-my-char');
+    if (!sel || !sel.value) return;
+    Multiplayer.setMyCharacter(sel.value).catch(e =>
+      _toast('Failed to set character: ' + e.message, 'error'));
+  }
+
   async function _mpStartGame() {
     try {
-      // Build playerSetups from Firebase players list
       const snap = await firebase.database().ref(`rooms/${Multiplayer.getRoomId()}/players`).get();
       const players = snap.val() || {};
+
+      // Validate all players have chosen a character
+      const missing = Object.values(players).filter(p => !p.characterId);
+      if (missing.length > 0) {
+        _toast(`${missing.map(p=>p.name).join(', ')} still need to choose a character!`, 'error');
+        return;
+      }
+
+      // Check no duplicate characters
+      const charIds = Object.values(players).map(p => p.characterId);
+      const dupes = charIds.filter((c, i) => charIds.indexOf(c) !== i);
+      if (dupes.length > 0) {
+        _toast('Duplicate characters detected! Everyone must pick a unique character.', 'error');
+        return;
+      }
+
       const playerSetups = Object.entries(players)
         .sort(([a],[b]) => parseInt(a) - parseInt(b))
         .map(([,p]) => ({ name: p.name, characterId: p.characterId }));
@@ -1710,6 +1871,6 @@ const UI = (() => {
     _resolveVandalism,
     _pbToggle: (id) => { /* set at runtime by _onPhantomBoltPrompt */ },
     // Multiplayer lobby actions (called from inline onclick)
-    _mpTab, _mpCreateRoom, _mpJoinRoom, _mpStartGame,
+    _mpTab, _mpCreateRoom, _mpJoinRoom, _mpStartGame, _mpPickChar,
   };
 })();
