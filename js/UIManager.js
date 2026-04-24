@@ -97,6 +97,13 @@ const UI = (() => {
     const container = $('char-select-content');
     container.innerHTML = '';
 
+    // ── Deep-link: auto-show join screen if ?room= is in URL ──
+    const urlRoomCode = new URLSearchParams(location.search).get('room');
+    if (urlRoomCode && window.Multiplayer && Multiplayer.isConfigured()) {
+      _buildInstantJoinScreen(container, urlRoomCode.toUpperCase());
+      return;
+    }
+
     // Step 1: how many players
     const header = document.createElement('div');
     header.className = 'panel-header';
@@ -188,6 +195,49 @@ const UI = (() => {
 
     countSel.onchange = () => _renderPlayerSetup(parseInt(countSel.value));
     _renderPlayerSetup(2);
+  }
+
+  // ── Instant-join screen (for invite-link players) ─────────
+  function _buildInstantJoinScreen(container, roomCode) {
+    container.innerHTML = `
+      <div class="panel-header">AVATERRA</div>
+      <div class="panel-sub" style="margin-bottom:18px;">You've been invited to join a game!</div>
+      <div style="background:#0d0d22;border:1px solid #3a3a6a;border-radius:8px;padding:20px;">
+        <div style="font-size:20px;font-weight:bold;letter-spacing:4px;color:#aaddff;text-align:center;margin-bottom:14px;">${roomCode}</div>
+        <label style="color:#888;font-size:12px;">Your name:</label>
+        <input id="ij-name" type="text" placeholder="Enter your name" autofocus
+          style="width:100%;background:#1a1a3a;border:1px solid #3a3a6a;color:#ccc;border-radius:4px;
+                 padding:8px;margin:6px 0 14px;font-size:14px;font-family:inherit;"
+          onkeydown="if(event.key==='Enter') UI._instantJoin()">
+        <button class="btn btn-primary big-btn" onclick="UI._instantJoin()">▶ Join Game</button>
+        <button class="btn btn-secondary" style="width:100%;margin-top:8px;font-size:12px;"
+          onclick="UI._buildCharSelectScreen()">← Back to Main Menu</button>
+      </div>`;
+
+    // Auto-focus the name field
+    setTimeout(() => { const f = document.getElementById('ij-name'); if (f) f.focus(); }, 50);
+
+    // Store the room code for _instantJoin to use
+    container._pendingRoomCode = roomCode;
+  }
+
+  async function _instantJoin() {
+    const container  = $('char-select-content');
+    const roomCode   = container._pendingRoomCode || new URLSearchParams(location.search).get('room') || '';
+    const nameInput  = document.getElementById('ij-name');
+    const name       = (nameInput ? nameInput.value : '').trim() || 'Player';
+
+    // Show loading state
+    const btn = container.querySelector('.btn-primary');
+    if (btn) { btn.disabled = true; btn.textContent = 'Joining…'; }
+
+    try {
+      const slot = await Multiplayer.joinRoom(roomCode.toUpperCase(), name);
+      _mpShowWaiting(roomCode.toUpperCase(), slot, null, false);
+    } catch (e) {
+      _toast(e.message || 'Failed to join room.', 'error');
+      if (btn) { btn.disabled = false; btn.textContent = '▶ Join Game'; }
+    }
   }
 
   // ── Multiplayer lobby UI ─────────────────────────────────
@@ -1833,5 +1883,7 @@ const UI = (() => {
     _pbToggle: (id) => { /* set at runtime by _onPhantomBoltPrompt */ },
     // Multiplayer lobby actions (called from inline onclick)
     _mpTab, _mpCreateRoom, _mpJoinRoom, _mpStartGame, _mpPickChar,
+    // Instant-join (called from inline onclick in invite-link screen)
+    _instantJoin, _buildCharSelectScreen,
   };
 })();
