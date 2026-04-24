@@ -12,6 +12,7 @@ const UI = (() => {
   let _pendingTileClick = null; // callback waiting for tile click
   let _pendingPlayerClick = null;
   let _charSelectDefaults = null;
+  let _validMoveTargets = []; // updated on phase_changed 'move'
 
   // ── Multiplayer gating helpers ────────────────────────────
   // Returns true if the current-turn event should show UI to me
@@ -742,6 +743,13 @@ const UI = (() => {
   // ══════════════════════════════════════════════════════════
   function _onCombatStart(combat) {
     _updateHUD();
+    // In multiplayer PvP: notify defender that they're being attacked
+    if (combat.type === 'pvp' && window.Multiplayer && Multiplayer.isActive()) {
+      if (_isMyPlayerEvent(combat.defenderId)) {
+        const atk = GS.getPlayer(combat.attackerId);
+        _toast(`⚔️ ${atk ? atk.name : 'Someone'} is attacking you! Choose your defense card.`, 'warning');
+      }
+    }
     if (combat.type === 'hunt') {
       _showHuntCombat(combat);
     } else if (combat.type === 'seeking_arrow') {
@@ -833,28 +841,68 @@ const UI = (() => {
     el.appendChild(box);
   }
 
+  // Waiting screen shown to a player who isn't the active combatant
+  function _buildCombatWaiting(atkName, defName, message) {
+    const el = $('combat-overlay');
+    el.innerHTML = '';
+    el.classList.remove('hidden');
+    const box = document.createElement('div');
+    box.className = 'combat-box';
+    box.innerHTML = `
+      <div class="combat-title">⚔️ COMBAT</div>
+      <div style="font-size:14px;color:#aaa;margin-bottom:16px">
+        <b style="color:#fff">${atkName}</b> vs <b style="color:#fff">${defName}</b>
+      </div>
+      <div class="roulette-die" style="font-size:40px;min-height:54px;">⏳</div>
+      <div style="color:#888;font-size:13px;margin-top:12px;">${message}</div>`;
+    el.appendChild(box);
+  }
+
   function _showPvPCombat(combat) {
-    const atk = GS.getPlayer(combat.attackerId);
-    const def = GS.getPlayer(combat.defenderId);
-    const s   = GS.getState();
+    const atk  = GS.getPlayer(combat.attackerId);
+    const def  = GS.getPlayer(combat.defenderId);
+    const isMP = window.Multiplayer && Multiplayer.isActive();
 
     const el = $('combat-overlay');
     el.innerHTML = '';
     el.classList.remove('hidden');
 
     if (combat.phase === 'attacker_select') {
-      // Show cover message first
-      _buildPassDeviceScreen(atk.name, 'select your attack card', () => {
+      if (!isMP) {
+        // Hotseat: pass-device screen then card selector
+        _buildPassDeviceScreen(atk.name, 'select your attack card', () => {
+          _buildCardSelector(atk,
+            `Round ${combat.round}/3 — <b>${atk.name}</b> attacks <b>${def.name}</b><br><small>Choose your card</small>`,
+            uid => { GS.selectCombatCard(atk.id, uid); });
+        });
+      } else if (_isMyPlayerEvent(combat.attackerId)) {
+        // MP: I am the attacker — show card selector directly
         _buildCardSelector(atk,
-          `Round ${combat.round}/3 — <b>${atk.name}</b> attacks <b>${def.name}</b><br><small>Choose your card</small>`,
+          `⚔️ Round ${combat.round}/3 — You attack <b>${def.name}</b><br><small>Choose your attack card</small>`,
           uid => { GS.selectCombatCard(atk.id, uid); });
-      });
+      } else {
+        // MP: I am the defender / spectator — show waiting
+        _buildCombatWaiting(atk.name, def.name,
+          `Waiting for ${atk.name} to choose their attack card…`);
+      }
     } else if (combat.phase === 'defender_select') {
-      _buildPassDeviceScreen(def.name, 'select your defense card', () => {
+      if (!isMP) {
+        // Hotseat: pass-device screen
+        _buildPassDeviceScreen(def.name, 'select your defense card', () => {
+          _buildCardSelector(def,
+            `Round ${combat.round}/3 — <b>${def.name}</b> defends<br><small>Match the attacker's card to block</small>`,
+            uid => { GS.selectCombatCard(def.id, uid); });
+        });
+      } else if (_isMyPlayerEvent(combat.defenderId)) {
+        // MP: I am the defender — show card selector with attack notification
         _buildCardSelector(def,
-          `Round ${combat.round}/3 — <b>${def.name}</b> defends<br><small>Match the attacker's card to block</small>`,
+          `🛡️ <b>${atk.name}</b> is attacking you! — Round ${combat.round}/3<br><small>Match their card to block, or play any card to take reduced damage</small>`,
           uid => { GS.selectCombatCard(def.id, uid); });
-      });
+      } else {
+        // MP: I am the attacker / spectator — show waiting
+        _buildCombatWaiting(atk.name, def.name,
+          `Waiting for ${def.name} to choose their defense card…`);
+      }
     } else if (combat.phase === 'reveal') {
       const atkCard = _getCardObj(atk, combat.attackerCard);
       const defCard = _getCardObj(def, combat.defenderCard);
@@ -1433,6 +1481,9 @@ const UI = (() => {
     const s = GS.getState();
     if (!s) return;
 
+    // Always close any open tile popup first
+    _closeTilePopup();
+
     if (_pendingTileClick) {
       const cb = _pendingTileClick;
       _pendingTileClick = null;
@@ -1446,6 +1497,9 @@ const UI = (() => {
     } else if (sub === 'ability') {
       const pa = s.pendingAction;
       if (pa && pa.type === 'veil_step')   GS.commitVeilStep(tileId);
+    } else if (sub === 'action_select') {
+      // Show contextual floating action popup for this tile
+      _showTileActionPopup(tileId);
     }
     _updateActionButtons();
   }
@@ -1473,6 +1527,145 @@ const UI = (() => {
     // Highlight valid tiles on the board
     const scene = window._gameScene;
     if (scene) scene.highlightTiles(validTiles, 0xffaa00);
+  }
+
+  // ══════════════════════════════════════════════════════════
+  //  TILE ACTION POPUP (floating contextual buttons on board)
+  // ══════════════════════════════════════════════════════════
+
+  function _getTileScreenPos(tileId) {
+    const scene = window._gameScene;
+    if (!scene) return null;
+    const tile = GS.getTile(tileId);
+    if (!tile) return null;
+    const TILE_W = 88, TILE_H = 88, TILE_PAD = 6;
+    const step   = TILE_W + TILE_PAD;
+    const worldX = 60 + tile.col * step + TILE_W / 2;
+    const worldY = 40 + tile.row * step + TILE_H / 2;
+    const cam    = scene.cameras.main;
+    const canvas = document.querySelector('#phaser-container canvas');
+    if (!canvas) return null;
+    const rect = canvas.getBoundingClientRect();
+    return {
+      x:         rect.left + (worldX - cam.scrollX) * cam.zoom,
+      y:         rect.top  + (worldY - cam.scrollY) * cam.zoom,
+      halfW:     (TILE_W / 2) * cam.zoom,
+      halfH:     (TILE_H / 2) * cam.zoom,
+    };
+  }
+
+  function _showTileActionPopup(tileId) {
+    _closeTilePopup();
+
+    const s = GS.getState();
+    if (!s || s.subphase !== 'action_select') return;
+    if (!_isMyTurnEvent()) return;
+
+    const isMP = window.Multiplayer && Multiplayer.isActive();
+    const myIdx = isMP ? Multiplayer.getMyIndex() : s.currentPlayerIndex;
+    const cp    = GS.getPlayer(myIdx);
+    if (!cp || !cp.alive) return;
+
+    const tile    = GS.getTile(tileId);
+    if (!tile || tile.removed) return;
+
+    const hasAP    = cp.actionsLeft >= 1;
+    const isMyTile = cp.tileId === tileId;
+    const actions  = [];
+
+    // ── Hunt monster ─────────────────────────────────────────
+    if (isMyTile && tile.hasMonster && hasAP) {
+      actions.push({
+        label: '🗡️ Hunt Monster',
+        onclick: () => { _closeTilePopup(); GS.beginHunt(); },
+      });
+    }
+
+    // ── Attack enemy players on this tile ────────────────────
+    if (hasAP) {
+      const targets = s.players.filter(t =>
+        t.alive && t.id !== cp.id && t.tileId === tileId && cp.tileId === tileId
+      );
+      targets.forEach(target => {
+        const char = CHARACTERS.find(c => c.id === target.characterId);
+        actions.push({
+          label: `⚔️ Attack ${target.name}`,
+          cls: 'danger',
+          onclick: () => { _closeTilePopup(); GS.commitAttack(target.id); },
+        });
+      });
+    }
+
+    // ── Rotate walled tile ───────────────────────────────────
+    if (isMyTile && tile.hasWalls && hasAP) {
+      actions.push({
+        label: '🔄 Rotate Walls',
+        onclick: () => { _closeTilePopup(); GS.beginInteract(); },
+      });
+    }
+
+    // ── Tower actions ────────────────────────────────────────
+    if (isMyTile && tile.type === 'tower' && hasAP) {
+      actions.push({
+        label: '🏰 Tower Actions',
+        onclick: () => { _closeTilePopup(); GS.beginInteract(); },
+      });
+    }
+
+    if (actions.length === 0) return;
+
+    // Highlight the selected tile with yellow ring
+    const scene = window._gameScene;
+    if (scene) scene.selectTile(tileId);
+
+    // Build & position the popup
+    const pos = _getTileScreenPos(tileId);
+    if (!pos) return;
+
+    const popup = $('tile-action-popup');
+    popup.innerHTML = '';
+    actions.forEach(act => {
+      const btn = document.createElement('button');
+      btn.className = 'tile-action-btn' + (act.cls ? ' ' + act.cls : '');
+      btn.textContent = act.label;
+      btn.onclick = act.onclick;
+      popup.appendChild(btn);
+    });
+
+    // Position to the right of tile; clamp to viewport
+    const VW = window.innerWidth, VH = window.innerHeight;
+    const popW = 170, popH = actions.length * 36 + 14;
+    let px = pos.x + pos.halfW + 10;
+    let py = pos.y - popH / 2;
+    if (px + popW > VW - 8)  px = pos.x - pos.halfW - popW - 10;
+    if (px < 8)              px = 8;
+    if (py < 8)              py = 8;
+    if (py + popH > VH - 8) py = VH - popH - 8;
+
+    popup.style.left = px + 'px';
+    popup.style.top  = py + 'px';
+    popup.classList.remove('hidden');
+
+    // Close on next outside click
+    setTimeout(() => {
+      document.addEventListener('click', _closeTilePopupOutside, { once: true });
+    }, 10);
+  }
+
+  function _closeTilePopupOutside(e) {
+    const popup = $('tile-action-popup');
+    if (popup && !popup.contains(e.target)) {
+      _closeTilePopup();
+    }
+    // if click was inside popup, the button's own onclick handles it (which calls _closeTilePopup)
+  }
+
+  function _closeTilePopup() {
+    const popup = $('tile-action-popup');
+    if (popup) popup.classList.add('hidden');
+    document.removeEventListener('click', _closeTilePopupOutside);
+    const scene = window._gameScene;
+    if (scene) scene.clearSelection();
   }
 
   // ── Player picker ─────────────────────────────────────────
@@ -1624,7 +1817,10 @@ const UI = (() => {
     // Close stale combat overlay when combat ends (received via remote state)
     if (s && !s.combat && s.subphase === 'action_select' && !s.pendingAction) {
       hide('combat-overlay');
+      hide('modal-overlay');
     }
+    // Always close tile popup on any state change (e.g. another player moved)
+    _closeTilePopup();
   }
 
   function _updateSpectatorBar() {
@@ -1643,12 +1839,19 @@ const UI = (() => {
     }
   }
 
-  function _onPhaseChanged({ subphase }) {
+  function _onPhaseChanged({ subphase, validTiles }) {
+    // Always clear tile popup & selection when phase changes
+    _closeTilePopup();
+
     if (subphase === 'action_select') {
+      _validMoveTargets = []; // reset move targets
       _updateActionButtons();
       // Hide combat overlay if no active combat (e.g. after Shadow Plunder resolves)
       const s = GS.getState();
       if (s && !s.combat) hide('combat-overlay');
+    }
+    if (subphase === 'move' && validTiles) {
+      _validMoveTargets = validTiles; // store so tile popup can offer "Move Here"
     }
     if (subphase === 'target_select') {
       // Handled in GameScene highlights
@@ -1889,6 +2092,8 @@ const UI = (() => {
     _pickInteractTile,
     _resolveVandalism,
     _pbToggle: (id) => { /* set at runtime by _onPhantomBoltPrompt */ },
+    // Tile action popup
+    _closeTilePopup,
     // Multiplayer lobby actions (called from inline onclick)
     _mpTab, _mpCreateRoom, _mpJoinRoom, _mpStartGame, _mpPickChar,
     // Instant-join (called from inline onclick in invite-link screen)

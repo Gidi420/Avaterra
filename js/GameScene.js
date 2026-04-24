@@ -18,6 +18,7 @@ class GameScene extends Phaser.Scene {
     this.playerTokens = {}; // playerId → container
     this.highlights   = []; // active highlight graphics
     this.removalMarkers = {}; // tileId → graphics (warning indicator)
+    this.selectedTileGfx = null; // yellow selection ring
     this.boardBuilt   = false;
 
     // Store reference immediately so UI can access this scene
@@ -96,13 +97,14 @@ class GameScene extends Phaser.Scene {
 
   _drawWalls(gfx, tile) {
     gfx.clear();
-    gfx.lineStyle(4, 0xff4444, 1);
+    gfx.lineStyle(4, 0xff5555, 1);
     const w = this.TILE_W / 2, h = this.TILE_H / 2;
+    const i = 8; // inset from edge so walls are clearly inside THIS tile
     const sides = rotateWalls(tile.wallConfig || 0, tile.wallRotation || 0);
-    if (sides & 0b0001) gfx.lineBetween(-w, -h, w, -h); // north
-    if (sides & 0b0010) gfx.lineBetween(w, -h, w, h);   // east
-    if (sides & 0b0100) gfx.lineBetween(-w, h, w, h);   // south
-    if (sides & 0b1000) gfx.lineBetween(-w, -h, -w, h); // west
+    if (sides & 0b0001) gfx.lineBetween(-w + i, -h + i, w - i, -h + i); // north
+    if (sides & 0b0010) gfx.lineBetween( w - i, -h + i, w - i,  h - i); // east
+    if (sides & 0b0100) gfx.lineBetween(-w + i,  h - i, w - i,  h - i); // south
+    if (sides & 0b1000) gfx.lineBetween(-w + i, -h + i,-w + i,  h - i); // west
   }
 
   // ── Player tokens ─────────────────────────────────────────
@@ -180,6 +182,25 @@ class GameScene extends Phaser.Scene {
     Object.values(this.tileObjects).forEach(obj => {
       if (obj.bg) obj.bg.setStrokeStyle(2, 0x555577);
     });
+  }
+
+  // ── Yellow selection ring (tile popup) ───────────────────
+  selectTile(tileId) {
+    this.clearSelection();
+    const tile = GS.getTile(tileId);
+    if (!tile) return;
+    const { x, y } = this._tileXY(tile);
+    const gfx = this.add.graphics().setDepth(9);
+    gfx.lineStyle(4, 0xffdd00, 1.0);
+    gfx.strokeRect(x - this.TILE_W / 2 + 3, y - this.TILE_H / 2 + 3, this.TILE_W - 6, this.TILE_H - 6);
+    this.selectedTileGfx = gfx;
+  }
+
+  clearSelection() {
+    if (this.selectedTileGfx) {
+      this.selectedTileGfx.destroy();
+      this.selectedTileGfx = null;
+    }
   }
 
   highlightTiles(tileIds, hexColor) {
