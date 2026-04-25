@@ -1817,10 +1817,16 @@ const UI = (() => {
     // Close stale combat overlay when combat ends (received via remote state)
     if (s && !s.combat && s.subphase === 'action_select' && !s.pendingAction) {
       hide('combat-overlay');
-      hide('modal-overlay');
+      // NOTE: do NOT hide modal-overlay here — legitimate modals (draw cards,
+      // buy item, upgrades) are open while subphase === 'action_select' and
+      // must not be force-closed on every state update.
     }
-    // Always close tile popup on any state change (e.g. another player moved)
-    _closeTilePopup();
+    // Close tile popup only when it's no longer the selecting player's turn
+    // (phase_changed handles popup close on turn transitions; here we only
+    //  close if the current player changed, i.e. it's no longer my turn)
+    if (s && window.Multiplayer && Multiplayer.isActive() && !Multiplayer.isMyTurn()) {
+      _closeTilePopup();
+    }
   }
 
   function _updateSpectatorBar() {
